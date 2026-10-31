@@ -306,6 +306,7 @@ class MainActivity : Activity() {
     Profiles.add(this, root) { exec(it) }
     Extras.add(this, root) { exec(it) }
     Legend.install(this, root) { exec(it) }
+    Magic.install(this, root)
 }
     override fun onResume() { super.onResume(); refresh(); h.post(tick) }
     override fun onPause() { h.removeCallbacks(tick); super.onPause() }
