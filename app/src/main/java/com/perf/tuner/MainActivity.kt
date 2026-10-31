@@ -303,7 +303,8 @@ class MainActivity : Activity() {
             "معلومات الجهاز" to "getprop ro.product.model; getprop ro.board.platform; getprop ro.hardware; getprop ro.build.version.release",
             "أكثر التطبيقات استهلاكاً" to "dumpsys cpuinfo | head -12",
             "♻️ استعادة كل الإعدادات" to RESET)
-    }
+    Profiles.add(this, root) { exec(it) }
+    Extras.add(this, root) { exec(it) }}
 
     override fun onResume() { super.onResume(); refresh(); h.post(tick) }
     override fun onPause() { h.removeCallbacks(tick); super.onPause() }
