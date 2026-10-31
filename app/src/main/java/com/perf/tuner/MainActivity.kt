@@ -304,8 +304,9 @@ class MainActivity : Activity() {
             "أكثر التطبيقات استهلاكاً" to "dumpsys cpuinfo | head -12",
             "♻️ استعادة كل الإعدادات" to RESET)
     Profiles.add(this, root) { exec(it) }
-    Extras.add(this, root) { exec(it) }}
-
+    Extras.add(this, root) { exec(it) }
+    Legend.install(this, root) { exec(it) }
+}
     override fun onResume() { super.onResume(); refresh(); h.post(tick) }
     override fun onPause() { h.removeCallbacks(tick); super.onPause() }
     override fun onDestroy() {
