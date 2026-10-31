@@ -4,7 +4,8 @@
     <queries><package android:name="moe.shizuku.privileged.api" /></queries>
     <application
         android:label="Perf Tuner"
-        android:theme="@android:style/Theme.DeviceDefault.Light">
+        android:icon="@drawable/ic_launcher"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
