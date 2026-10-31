@@ -470,4 +470,314 @@ class HomeActivity : Activity() {
         sv.isVerticalScrollBarEnabled = false
         sv.addView(l)
         content.addView(sv, FrameLayout.LayoutParams(-1, -1))
-   
+        pages.add(sv)
+        lists.add(l)
+        return l
+    }
+    private fun buildHome(l: LinearLayout) {
+        val t = TextView(this)
+        t.text = "⚡ PERF TUNER"; t.textSize = 30f; t.setTypeface(null, Typeface.BOLD)
+        val w = dp(300).toFloat()
+        val sh = LinearGradient(0f, 0f, w, 0f, intArrayOf(CY, PU, PK, CY), null, Shader.TileMode.REPEAT)
+        t.paint.shader = sh
+        ValueAnimator.ofFloat(0f, w).apply {
+            duration = 3200
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                sh.setLocalMatrix(Matrix().apply { setTranslate(it.animatedValue as Float, 0f) })
+                t.invalidate()
+            }
+            start()
+        }
+        l.addView(t)
+        l.addView(TextView(this).apply { text = "مركز التحكم بأداء هاتفك"; setTextColor(MUTED); textSize = 13f })
+        statusTv = TextView(this)
+        statusTv.textSize = 13f
+        statusTv.setPadding(0, dp(6), 0, dp(14))
+        statusTv.setOnClickListener { exec("echo ok") }
+        l.addView(statusTv)
+        refresh()
+
+        // التعزيز الرئيسي
+        val mc = card(l)
+        val top = LinearLayout(this)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.addView(TextView(this).apply {
+            text = "⚡"; textSize = 26f; gravity = Gravity.CENTER
+            background = rr(Color.parseColor("#33B388FF"), 30); setPadding(dp(14), dp(10), dp(14), dp(10))
+        })
+        val tc = titleDesc("التعزيز الرئيسي", "لمسة واحدة لتسريع ألعابك")
+        tc.setPadding(dp(12), 0, dp(12), 0)
+        top.addView(tc, LinearLayout.LayoutParams(0, -2, 1f))
+        masterSw = mkSwitch()
+        masterSw.setOnCheckedChangeListener { _, b -> if (!busy) { if (b) exec(masterCmd(true), "boost") else exec(masterCmd(false), "off") } }
+        top.addView(masterSw)
+        mc.addView(top)
+        val stats = LinearLayout(this)
+        stats.orientation = LinearLayout.HORIZONTAL
+        fun box(title: String): TextView {
+            val v = LinearLayout(this)
+            v.orientation = LinearLayout.VERTICAL
+            v.background = rr(Color.parseColor("#22FFFFFF"), 14)
+            v.setPadding(dp(12), dp(10), dp(12), dp(10))
+            v.addView(TextView(this).apply { text = title; setTextColor(MUTED); textSize = 11f })
+            val x = TextView(this)
+            x.setTextColor(Color.WHITE); x.textSize = 18f; x.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            v.addView(x)
+            stats.addView(v, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(dp(3), dp(10), dp(3), dp(6)) })
+            return x
+        }
+        modTv = box("الوحدات")
+        stateTv = box("الحالة")
+        mc.addView(stats)
+        modBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        modBar.max = 100
+        modBar.progressTintList = ColorStateList.valueOf(CY)
+        modBar.progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#33FFFFFF"))
+        mc.addView(modBar, LinearLayout.LayoutParams(-1, dp(8)).apply { setMargins(dp(3), 0, dp(3), dp(6)) })
+
+        // إجراءات سريعة
+        val qa = card(l, "⚡ إجراءات سريعة")
+        grid(qa, listOf(
+            btn("🛡 تعزيز آمن", CY) { exec("am kill-all; pm trim-caches 999G; cmd activity idle-maintenance", "boost") },
+            btn("🎮 تعزيز الألعاب", PU) { exec(masterCmd(true) + "; " + Cat.GAME, "boost") },
+            btn("🧠 تحرير الذاكرة", GR) { exec(Cat.FREE, "boost") },
+            btn("♻️ استعادة", OG) { ask("سيرجع كل الإعدادات للوضع الأصلي. متابعة؟") { restoreAll() } },
+            btn("🏆 يوم المباراة", PK) { exec(masterCmd(true) + "; " + Cat.GAME + "; " + listCmd("close") + listCmd("restrict"), "boost") },
+            btn("🧹 مسح الكاش", CY) { exec("pm trim-caches 999G") }
+        ))
+
+        // المراقبة
+        val m = card(l, "📊 المراقبة المباشرة")
+        meter(m, CY).let { ramTv = it.first; ramBar = it.second }
+        meter(m, PK).let { cpuTv = it.first; cpuBar = it.second }
+        meter(m, OG).let { tmpTv = it.first; tmpBar = it.second }
+        chart = Chart(this)
+        m.addView(TextView(this).apply { text = "🔵 الذاكرة   🟠 الحرارة"; setTextColor(MUTED); textSize = 12f })
+        m.addView(chart, LinearLayout.LayoutParams(-1, dp(130)).apply { setMargins(0, dp(6), 0, dp(6)) })
+    }
+
+    private fun buildPerf(l: LinearLayout) {
+        for (s in Cat.sections) {
+            val c = card(l, s.icon + " " + s.title)
+            val acts = ArrayList<TextView>()
+            for (x in s.items) {
+                when (x) {
+                    is Sw -> swRow(c, x)
+                    is Sl -> slRow(c, x)
+                    is Ch -> chRow(c, x)
+                    is Ac -> acts.add(btn(x.title, PU) { ask(x.warn) { exec(x.cmd) } })
+                    is Tip -> c.addView(TextView(this).apply { text = x.text; setTextColor(MUTED); textSize = 12f; setPadding(dp(2), dp(8), dp(2), dp(4)) })
+                }
+            }
+            if (acts.isNotEmpty()) grid(c, acts)
+        }
+    }
+
+    private fun pkgBtn(label: String, cmd: String): TextView = btn(label, CY) {
+        val p = pkgIn.text.toString().trim()
+        if (!Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$").matches(p)) toast("اكتب اسم حزمة صحيح")
+        else exec(cmd.replace("%P%", p))
+    }
+
+    private fun listRow(c: LinearLayout, k: String, label: String) {
+        c.addView(TextView(this).apply {
+            text = label; setTextColor(Color.WHITE); textSize = 14f
+            setTypeface(null, Typeface.BOLD); setPadding(0, dp(8), 0, dp(2))
+        })
+        grid(c, listOf(
+            btn("📋 اختيار", CY) { pick(k, label) },
+            btn("▶ تطبيق الآن", PK) { exec(listCmd(k), "boost") }
+        ))
+    }
+
+    private fun buildGames(l: LinearLayout) {
+        Profiles.add(this, l) { exec(it, "boost") }
+
+        val c = card(l, "🎯 أدوات لتطبيق أو لعبة")
+        pkgIn = EditText(this)
+        pkgIn.hint = "اسم الحزمة مثل com.tencent.ig"
+        pkgIn.setHintTextColor(Color.GRAY); pkgIn.setTextColor(Color.WHITE); pkgIn.textSize = 14f
+        pkgIn.setSingleLine(); pkgIn.inputType = InputType.TYPE_CLASS_TEXT
+        pkgIn.background = rr(Color.parseColor("#22FFFFFF"), 12, Color.parseColor("#44FFFFFF"))
+        pkgIn.setPadding(dp(12), dp(10), dp(12), dp(10))
+        c.addView(pkgIn, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, dp(6)) })
+        grid(c, listOf(
+            pkgBtn("🎮 وضع الأداء", "cmd game set --mode performance %P%"),
+            pkgBtn("🔓 بدون سقف FPS", "cmd game set --mode performance --downscale disable --fps disable %P%"),
+            pkgBtn("⚙️ تجميع speed", "cmd package compile -m speed -f %P%"),
+            pkgBtn("⭐ أولوية اللعبة", "am set-standby-bucket %P% active; cmd deviceidle whitelist +%P%"),
+            pkgBtn("🚫 تقييد الخلفية", "cmd appops set %P% RUN_IN_BACKGROUND ignore"),
+            pkgBtn("✅ إلغاء التقييد", "cmd appops set %P% RUN_IN_BACKGROUND allow"),
+            pkgBtn("▶ تشغيل", "monkey -p %P% -c android.intent.category.LAUNCHER 1"),
+            pkgBtn("⛔ إيقاف", "am force-stop %P%"),
+            pkgBtn("ℹ️ معلومات", "dumpsys package %P% | grep -E 'versionName|firstInstallTime'")
+        ))
+
+        val ls = card(l, "🧠 قوائم التطبيقات")
+        listRow(ls, "protect", "🛡 تطبيقات محمية (تبقى في الذاكرة)")
+        listRow(ls, "restrict", "🚫 تطبيقات مقيّدة في الخلفية")
+        listRow(ls, "close", "❌ تطبيقات تُغلق عند اللعب")
+
+        val tl = card(l, "🛠 أدوات")
+        plainSwitch(tl, "🔊 المؤثرات الصوتية", "أصوات ناعمة عند اللمس والتنقل", Sfx.enabled) {
+            Sfx.enabled = it
+            sp.edit().putBoolean("sound", it).apply()
+        }
+        plainSwitch(tl, "🔔 إشعار التعزيز السريع", "تعزيز واستعادة من شريط الإشعارات", false) {
+            if (it) showNotif() else hideNotif()
+        }
+        grid(tl, listOf(
+            btn("🔍 تشخيص الجهاز", CY) { exec("getprop ro.product.model; getprop ro.board.platform; getprop ro.build.version.release; wm size; wm density; dumpsys display | grep -iE 'refreshRate|fps=' | head -6") },
+            btn("♻️ استعادة كل شيء", OG) { ask("سيرجع كل الإعدادات للوضع الأصلي. متابعة؟") { restoreAll() } }
+        ))
+    }
+
+    // ---------- شريط التبويبات والتنقل ----------
+    private fun buildBar() {
+        bar = FrameLayout(this)
+        bar.layoutDirection = View.LAYOUT_DIRECTION_LTR
+        bar.background = rr(Color.parseColor("#EE0A0D20"), 0)
+        bar.setPadding(0, dp(8), 0, dp(8))
+        pill = View(this)
+        pill.background = rr(Color.parseColor("#44B388FF"), 26, Color.parseColor("#88B388FF"))
+        bar.addView(pill, FrameLayout.LayoutParams(dp(90), dp(56), Gravity.CENTER_VERTICAL))
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        val names = listOf("الرئيسية", "الأداء", "الألعاب")
+        val icons = listOf("🏠", "⚡", "🎮")
+        for (pos in 0..2) {
+            val idx = 2 - pos
+            val cell = LinearLayout(this)
+            cell.orientation = LinearLayout.VERTICAL
+            cell.gravity = Gravity.CENTER
+            val ic = TextView(this)
+            ic.text = icons[idx]; ic.textSize = 22f; ic.gravity = Gravity.CENTER
+            val lb = TextView(this)
+            lb.text = names[idx]; lb.textSize = 11f; lb.gravity = Gravity.CENTER
+            cell.addView(ic)
+            cell.addView(lb)
+            tabIcon[idx] = ic
+            tabLabel[idx] = lb
+            press(cell)
+            cell.setOnClickListener { show(idx) }
+            row.addView(cell, LinearLayout.LayoutParams(0, dp(56), 1f))
+        }
+        bar.addView(row, FrameLayout.LayoutParams(-1, dp(56)))
+        bar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> movePill(false) }
+    }
+
+    private fun movePill(anim: Boolean) {
+        val w = bar.width / 3f
+        if (w <= 0f) return
+        val lp = pill.layoutParams as FrameLayout.LayoutParams
+        val pw = (w - dp(24)).toInt()
+        if (lp.width != pw) { lp.width = pw; pill.layoutParams = lp }
+        val x = (2 - cur) * w + dp(12)
+        if (anim) pill.animate().translationX(x).setDuration(420).setInterpolator(OvershootInterpolator(1.2f)).start()
+        else pill.translationX = x
+    }
+
+    private fun refreshTabs() {
+        for (i in 0..2) {
+            val on = i == cur
+            val s = if (on) 1.3f else 1f
+            tabIcon[i]?.animate()?.scaleX(s)?.scaleY(s)?.setDuration(320)?.setInterpolator(OvershootInterpolator(2.5f))?.start()
+            tabLabel[i]?.setTextColor(if (on) Color.WHITE else MUTED)
+        }
+    }
+
+    private fun stagger(i: Int) {
+        val l = lists[i]
+        for (k in 0 until l.childCount) {
+            val c = l.getChildAt(k)
+            c.alpha = 0f
+            c.translationY = dp(40).toFloat()
+            c.animate().alpha(1f).translationY(0f).setStartDelay(70L * k).setDuration(480)
+                .setInterpolator(OvershootInterpolator(1.05f)).start()
+        }
+    }
+
+    private fun show(i: Int) {
+        if (i == cur) return
+        Sfx.play("nav")
+        val old = pages[cur]
+        val nw = pages[i]
+        val w = content.width.toFloat()
+        val dir = if (i > cur) -1f else 1f
+        old.animate().alpha(0f).translationX(-dir * w * 0.25f).setDuration(220)
+            .withEndAction { if (pages[cur] !== old) old.visibility = View.GONE }.start()
+        nw.visibility = View.VISIBLE
+        nw.alpha = 0f
+        nw.translationX = dir * w * 0.25f
+        nw.animate().alpha(1f).translationX(0f).setDuration(380).setInterpolator(DecelerateInterpolator(2f)).start()
+        cur = i
+        stagger(i)
+        movePill(true)
+        refreshTabs()
+        bg.animate().translationX((1 - i) * dp(18).toFloat()).setDuration(600).start()
+    }
+
+    // ---------- دورة الحياة ----------
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        sp = getSharedPreferences("home", Context.MODE_PRIVATE)
+        Sfx.enabled = sp.getBoolean("sound", true)
+        window.statusBarColor = Color.parseColor("#070A1E")
+        window.navigationBarColor = Color.parseColor("#0A0D20")
+        try { Shizuku.addRequestPermissionResultListener(permL) } catch (e: Throwable) {}
+
+        val root = FrameLayout(this)
+        root.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        bg = AnimeBg(this)
+        bg.scaleX = 1.15f
+        bg.scaleY = 1.15f
+        root.addView(bg, FrameLayout.LayoutParams(-1, -1))
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        content = FrameLayout(this)
+        col.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        buildBar()
+        col.addView(bar, LinearLayout.LayoutParams(-1, -2))
+        root.addView(col, FrameLayout.LayoutParams(-1, -1))
+        setContentView(root)
+
+        buildHome(page())
+        buildPerf(page())
+        buildGames(page())
+        pages[1].visibility = View.GONE
+        pages[2].visibility = View.GONE
+        updateMaster()
+        refreshTabs()
+        stagger(0)
+
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
+        }
+        try {
+            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) Shizuku.requestPermission(1)
+        } catch (e: Throwable) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        refresh()
+        h.post(tick)
+    }
+
+    override fun onPause() {
+        resumed = false
+        h.removeCallbacks(tick)
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        try { Shizuku.removeRequestPermissionResultListener(permL) } catch (e: Throwable) {}
+        super.onDestroy()
+    }
+}
+    
+        
