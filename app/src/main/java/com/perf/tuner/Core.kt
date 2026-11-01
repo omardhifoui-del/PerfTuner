@@ -260,6 +260,7 @@ object Cat {
     fun restoreCmd(): String {
         val sb = StringBuilder()
         for (s in all) sb.append(s.off).append("; ")
+        for (s in Catalog2.all) sb.append(s.off).append("; ")
         sb.append("wm size reset; device_config delete activity_manager max_cached_processes; settings put global private_dns_mode opportunistic; ")
         sb.append(HZ0).append("; ")
         sb.append(MainActivity.RESET)
