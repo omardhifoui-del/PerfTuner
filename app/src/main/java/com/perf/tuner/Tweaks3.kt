@@ -53,7 +53,8 @@ val MORE2: Map<Int, List<Tweak>> = mapOf(
         N("لمس متعدد 100ms", "نافذة استجابة أقصر", listOf(ss("multi_press_timeout", "100")))
     ),
     5 to listOf(
-        N("تعطيل فحص البوابة", "اتصال أسرع بالشبكات (captive portal)", listOf(sg("captive_portal_mode", "0")))
+        N("تعطيل فحص البوابة", "اتصال أسرع بالشبكات (captive portal)", listOf(sg("captive_portal_mode", "0"))),
+        N("تسريع Tethering بالعتاد", "لنقطة الاتصال إن كان مدعوماً", listOf(sg("tether_offload_disabled", "0")), ultra = true)
     ),
     6 to listOf(
         N("قائمة بيضاء للبطارية", "للحزم المكتوبة في تبويب الألعاب",
