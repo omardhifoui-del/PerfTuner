@@ -6,6 +6,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.media.MediaPlayer
 import android.os.Build
+import android.os.Environment
+import android.os.StatFs
+import android.view.WindowManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -24,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -145,22 +149,95 @@ fun Chip(text: String, selected: Boolean, c: Color, m: Modifier, onClick: () -> 
     ) { Text(text.substringAfter(' '), fontSize = 11.sp, color = Color.White, maxLines = 1) }
 }
 
+private data class Sys(
+    val ramUsed: Long = 0, val ramTotal: Long = 1,
+    val stUsed: Double = 0.0, val stTotal: Double = 1.0,
+    val bat: Int = 0, val shizuku: Boolean = false
+)
+
+private fun f1(v: Double) = String.format(java.util.Locale.US, "%.1f", v)
+
 @Composable
 fun DeviceCard(hue: State<Float>) {
     val ctx = LocalContext.current
-    val mi = remember {
-        ActivityManager.MemoryInfo().also { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) }
+    var s by remember { mutableStateOf(Sys()) }
+    val display = remember {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val r = (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).maximumWindowMetrics.bounds
+            "${r.width()}x${r.height()}"
+        } else ctx.resources.displayMetrics.let { "${it.widthPixels}x${it.heightPixels}" }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            s = withContext(Dispatchers.IO) {
+                val mi = ActivityManager.MemoryInfo()
+                (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mi)
+                val sf = StatFs(Environment.getDataDirectory().path)
+                val tot = sf.totalBytes / 1073741824.0
+                val free = sf.availableBytes / 1073741824.0
+                val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val lvl = b?.getIntExtra("level", 0) ?: 0
+                val sc = (b?.getIntExtra("scale", 100) ?: 100).coerceAtLeast(1)
+                val sh = try { rikka.shizuku.Shizuku.pingBinder() } catch (_: Throwable) { false }
+                Sys(mi.totalMem - mi.availMem, mi.totalMem, tot - free, tot, lvl * 100 / sc, sh)
+            }
+            delay(3000)
+        }
     }
     val h = hue.value
+    val gb = 1073741824.0
     Column(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth()
-            .border(BorderStroke(2.dp, Brush.linearGradient(listOf(hc(h), hc(h, 120f)))), RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = .05f), RoundedCornerShape(16.dp)).padding(12.dp)
+            .border(BorderStroke(2.dp, Brush.linearGradient(listOf(hc(h), hc(h, 120f), hc(h, 240f)))), RoundedCornerShape(18.dp))
+            .background(Brush.linearGradient(listOf(hc(h, 200f).copy(alpha = .35f), hc(h, 320f).copy(alpha = .35f))), RoundedCornerShape(18.dp))
+            .padding(10.dp)
     ) {
-        Text("📱 ${Build.MANUFACTURER} ${Build.MODEL}", color = hc(h), fontWeight = FontWeight.Bold)
-        Text("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})  •  ${Build.HARDWARE}", color = Color.White, fontSize = 12.sp)
-        Text("🧠 RAM ${mi.totalMem / 1048576} MB  •  ⚙ ${Runtime.getRuntime().availableProcessors()} cores", color = Color.White, fontSize = 12.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("${Build.MANUFACTURER} ${Build.MODEL}".uppercase(), color = Color.White,
+                    fontWeight = FontWeight.Black, fontSize = 15.sp, maxLines = 1)
+                Text("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", color = hc(h, 60f), fontSize = 12.sp)
+            }
+            Row(
+                Modifier.border(BorderStroke(1.5.dp, hc(h)), RoundedCornerShape(50)).padding(10.dp, 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(8.dp).background(if (s.shizuku) Color(0xFF2EE66B) else Color(0xFFFF4D4D), CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text("Shizuku", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Tile("RAM", "${f1(s.ramUsed / gb)}/${f1(s.ramTotal / gb)} GB", (s.ramUsed.toFloat() / s.ramTotal), hc(h))
+            Tile("STORAGE", "${f1(s.stUsed)}/${f1(s.stTotal)} GB", (s.stUsed / s.stTotal).toFloat(), hc(h, 120f))
+            Tile("BATTERY", "${s.bat}%", s.bat / 100f, if (s.bat < 20) Color(0xFFFF4D4D) else hc(h, 240f))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Tile("SDK LEVEL", "API ${Build.VERSION.SDK_INT}", null, hc(h))
+            Tile("DISPLAY", display, null, hc(h))
+            Tile("FREE SPACE", "${f1(s.stTotal - s.stUsed)} GB", null, hc(h))
+        }
+        Spacer(Modifier.height(6.dp))
         LiveLine()
+    }
+}
+
+@Composable
+fun RowScope.Tile(label: String, value: String, frac: Float?, c: Color) {
+    Column(
+        Modifier.weight(1f).background(Color.White.copy(alpha = .12f), RoundedCornerShape(12.dp)).padding(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        if (frac != null) {
+            Spacer(Modifier.height(4.dp))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color.White.copy(alpha = .25f))) {
+                Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).fillMaxHeight().background(c))
+            }
+        }
     }
 }
 
@@ -361,8 +438,8 @@ fun BoostBar(engine: Engine, onDone: () -> Unit) {
     }
     val pad = PaddingValues(4.dp)
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
+        Button(onClick = { run(1) }, enabled = !busy, modifi
+               Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🚀 آمن", fontSize = 12.sp) }
@@ -503,5 +580,3 @@ fun AppBackground() {
         }
     }
 }
-
-                   
