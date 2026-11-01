@@ -88,7 +88,6 @@ fun App(engine: Engine, player: MediaPlayer?) {
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Header(hue, player)
         DeviceCard(hue)
-        BoostBar(engine) { ver++ }
         TopTabs(sel, hue) { sel = it }
         AnimatedContent(
             targetState = sel, modifier = Modifier.weight(1f), label = "page",
@@ -97,7 +96,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
                 (slideInHorizontally(tween(260)) { it / 4 * d } + fadeIn(tween(260)))
                     .togetherWith(slideOutHorizontally(tween(200)) { -it / 4 * d } + fadeOut(tween(160)))
             }
-        ) { page -> key(ver) { Page(page, engine) } }
+        ) { page -> key(ver) { Page(page, engine) { ver++ } } }
         BottomNav(sel, hue) { sel = it }
     }
     }
@@ -196,9 +195,10 @@ fun LiveLine() {
 }
 
 @Composable
-fun Page(page: Int, engine: Engine) {
+fun Page(page: Int, engine: Engine, onBoost: () -> Unit) {
     val list = TWEAKS[page].orEmpty()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { BoostBar(engine, onBoost) }
         item { Text(CATS[page], color = ACCENT, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         if (page == 8) item {
             var v by remember { mutableStateOf(engine.pkgs().joinToString(", ")) }
@@ -285,38 +285,73 @@ private val EXCL = setOf(
     6 to 0, 6 to 5, 7 to 1, 7 to 2, 8 to 0, 8 to 1, 8 to 2, 8 to 4, 9 to 0, 9 to 1
 )
 
+private fun allIdx() = TWEAKS.flatMap { (p, l) -> l.indices.map { p to it } }
+private fun ultraIdx() = allIdx().filter { k ->
+    k !in EXCL && TWEAKS[k.first]!![k.second].let { t -> t.ultra && !t.report && !t.perPkg }
+}
+private fun byTitle(titles: Set<String>) = allIdx().filter { TWEAKS[it.first]!![it.second].title in titles }
+
+private val PROFILES = listOf("افتراضي", "متوازن", "توفير", "أداء", "ألعاب", "أقصى")
+private val P_BALANCED = setOf(
+    "أنيميشن 0.5x", "إلغاء ضبابية النوافذ", "تجميد التطبيقات المخبأة",
+    "ضغط ذاكرة العمليات", "ضغطة طويلة 250ms", "ضغطة مزدوجة أسرع"
+)
+private val P_BATTERY = setOf(
+    "تفعيل توفير الطاقة", "إيقاف العرض الدائم", "تثبيت 60Hz", "إيقاف مسح Wi-Fi الخلفي",
+    "إيقاف مسح Bluetooth الخلفي", "أنيميشن 0.5x", "إيقاف اهتزاز اللمس", "إيقاف أصوات اللمس"
+)
+private val P_GAME_EXTRA = setOf("Game Mode: أداء", "أولوية اللعبة", "إلغاء حد 60FPS (أندرويد 14+)")
+
+private fun profileList(i: Int): List<Pair<Int, Int>> = when (i) {
+    1 -> byTitle(P_BALANCED)
+    2 -> byTitle(P_BATTERY)
+    3 -> BOOST
+    4 -> ultraIdx() + byTitle(P_GAME_EXTRA)
+    5 -> ultraIdx()
+    else -> emptyList()
+}
+
+private fun applyList(engine: Engine, list: List<Pair<Int, Int>>): Int {
+    var c = 0
+    for ((p, i) in list) {
+        val t = TWEAKS[p]?.getOrNull(i) ?: continue
+        if (t.report || (t.perPkg && engine.pkgs().isEmpty())) continue
+        if (engine.apply(t, "$p-$i")) c++
+    }
+    return c
+}
+
+private fun restoreAll(engine: Engine): Int {
+    var c = 0
+    for ((p, i) in allIdx()) {
+        val t = TWEAKS[p]!![i]; val id = "$p-$i"
+        if (!t.oneShot && !t.report && engine.isOn(id) && engine.revert(t, id)) c++
+    }
+    return c
+}
+
 @Composable
 fun BoostBar(engine: Engine, onDone: () -> Unit) {
     val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     var busy by remember { mutableStateOf(false) }
+    var showProfiles by remember { mutableStateOf(false) }
+    var showRam by remember { mutableStateOf(false) }
     fun run(mode: Int) { // 0 آمن، 1 ULTRA، 2 استعادة، 3 تحرير RAM، 4 مسح الكاش
         scope.launch {
             busy = true
-            val all = TWEAKS.flatMap { (p, l) -> l.indices.map { p to it } }
-            val list = when (mode) {
-                0 -> BOOST
-                1 -> all.filter { k -> k !in EXCL && TWEAKS[k.first]!![k.second].let { t -> t.ultra && !t.report && !t.perPkg } }
-                2 -> all
-                else -> emptyList()
-            }
-            val n = withContext(Dispatchers.IO) {
-                var c = 0
+            val (n, total) = withContext(Dispatchers.IO) {
                 when (mode) {
-                    3 -> Shell.run("am kill-all")
-                    4 -> Shell.run("pm trim-caches 999G")
-                    else -> for ((p, i) in list) {
-                        val t = TWEAKS[p]?.getOrNull(i) ?: continue
-                        val id = "$p-$i"
-                        if (mode < 2) { if (engine.apply(t, id)) c++ }
-                        else if (!t.oneShot && !t.report && engine.isOn(id) && engine.revert(t, id)) c++
-                    }
+                    0 -> applyList(engine, BOOST) to BOOST.size
+                    1 -> { val l = ultraIdx(); applyList(engine, l) to l.size }
+                    2 -> restoreAll(engine) to 0
+                    3 -> { Shell.run("am kill-all"); 0 to 0 }
+                    else -> { Shell.run("pm trim-caches 999G"); 0 to 0 }
                 }
-                c
             }
             busy = false; onDone()
             val msg = when (mode) {
-                0 -> "🚀 طُبّق $n / ${list.size}"
-                1 -> "🔥 ULTRA طُبّق $n / ${list.size}"
+                0 -> "🚀 طُبّق $n / $total"
+                1 -> "🔥 ULTRA طُبّق $n / $total"
                 2 -> "♻ استُعيد $n"
                 3 -> "🧠 حُرِّرت الذاكرة"
                 else -> "🧹 مُسح الكاش"
@@ -324,17 +359,135 @@ fun BoostBar(engine: Engine, onDone: () -> Unit) {
             Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
         }
     }
-    Column(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val pad = PaddingValues(4.dp)
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🚀 آمن", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(3) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🧠 RAM", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(4) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🧹 كاش", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("♻ استعادة", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🚀 آمن", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(3) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🧠 RAM", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(4) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🧹 كاش", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("♻ استعادة", fontSize = 12.sp) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { showProfiles = true }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🎛 ملفات وتحليل", fontSize = 12.sp) }
+            OutlinedButton(onClick = { showRam = true }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("📊 RAM Booster", fontSize = 12.sp) }
         }
     }
+    if (showProfiles) ProfilesDialog(engine, { showProfiles = false }, onDone)
+    if (showRam) RamBoosterDialog { showRam = false }
+}
+
+@Composable
+fun ProfilesDialog(engine: Engine, onDismiss: () -> Unit, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current
+    var checks by remember { mutableStateOf<List<Pair<String, Boolean>>?>(null) }
+    var sel by remember { mutableIntStateOf(3) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        checks = withContext(Dispatchers.IO) {
+            listOf(
+                "اتصال Shizuku" to (Shell.run("echo ok").second == "ok"),
+                "محرك الشاشة" to Shell.run("dumpsys display | head -n 3").second.isNotBlank(),
+                "تحليل الذاكرة" to Shell.run("head -n 1 /proc/meminfo").second.isNotBlank(),
+                "التطبيقات الخلفية" to Shell.run("dumpsys activity processes | head -n 2").second.isNotBlank(),
+                "وضع الألعاب" to (Shell.run("cmd -l | grep -q game").first == 0),
+                "الحالة الحرارية" to Shell.run("dumpsys thermalservice | head -n 2").second.isNotBlank()
+            )
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("تحليل الجهاز والملفات", fontSize = 16.sp) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                val c = checks
+                if (c == null) Text("جارٍ التحليل...", color = Color.Gray)
+                else c.forEach { (n, ok) -> Text((if (ok) "✅ " else "❌ ") + n, fontSize = 13.sp) }
+                Spacer(Modifier.height(10.dp))
+                Text("الملف:", fontWeight = FontWeight.Bold)
+                PROFILES.forEachIndexed { i, name ->
+                    Row(Modifier.fillMaxWidth().clickable { sel = i }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = sel == i, onClick = { sel = i })
+                        Text(name)
+                    }
+                }
+                Text("«ألعاب» يستخدم الحزم المكتوبة في تبويب الألعاب. التطبيق يستعيد كل شيء أولاً ثم يطبّق الملف.",
+                    fontSize = 11.sp, color = Color.Gray)
+            }
+        },
+        confirmButton = {
+            Button(enabled = !busy && checks != null, onClick = {
+                scope.launch {
+                    busy = true
+                    val n = withContext(Dispatchers.IO) { restoreAll(engine); applyList(engine, profileList(sel)) }
+                    busy = false
+                    Toast.makeText(ctx, "🎛 ${PROFILES[sel]}: طُبّق $n", Toast.LENGTH_LONG).show()
+                    onDone(); onDismiss()
+                }
+            }) { Text(if (busy) "..." else "▶ تطبيق") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
+    )
+}
+
+@Composable
+fun RamBoosterDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current; val scope = rememberCoroutineScope()
+    var apps by remember { mutableStateOf<List<Pair<String, Long>>?>(null) }
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.IO) {
+            val out = Shell.run("dumpsys meminfo | sed -n '/Total PSS by process/,/^$/p'").second
+            val rx = Regex("""\s*([\d,]+)K: (\S+) \(pid (\d+)""")
+            val safe = Regex("[A-Za-z0-9._]+")
+            out.lines().mapNotNull { l ->
+                val m = rx.find(l) ?: return@mapNotNull null
+                val pkg = m.groupValues[2].substringBefore(':')
+                val mb = (m.groupValues[1].replace(",", "").toLongOrNull() ?: 0L) / 1024
+                if (!safe.matches(pkg) || pkg == ctx.packageName || pkg == "system" ||
+                    pkg.startsWith("com.android.") || pkg.startsWith("android.") ||
+                    pkg.contains("launcher") || pkg.contains("inputmethod") || pkg.contains("keyboard")
+                ) null else pkg to mb
+            }.distinctBy { it.first }.take(12)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("📊 RAM Booster", fontSize = 16.sp) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                val list = apps
+                if (list == null) Text("جارٍ القراءة...", color = Color.Gray)
+                else if (list.isEmpty()) Text("لا توجد تطبيقات ثقيلة الآن", color = Color.Gray)
+                else list.forEach { (pkg, mb) ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(pkg, fontSize = 12.sp, maxLines = 1)
+                            Text("$mb MB", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        TextButton(onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { Shell.run("am force-stop $pkg") }
+                                apps = apps?.filter { it.first != pkg }
+                            }
+                        }) { Text("إيقاف") }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(enabled = !apps.isNullOrEmpty(), onClick = {
+                scope.launch {
+                    val l = apps.orEmpty().take(8)
+                    withContext(Dispatchers.IO) { l.forEach { Shell.run("am force-stop ${it.first}") } }
+                    Toast.makeText(ctx, "أُوقف ${l.size} تطبيقات", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }
+            }) { Text("إيقاف أثقل 8") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("إغلاق") } }
+    )
 }
 
 @Composable
@@ -350,3 +503,5 @@ fun AppBackground() {
         }
     }
 }
+
+                   
