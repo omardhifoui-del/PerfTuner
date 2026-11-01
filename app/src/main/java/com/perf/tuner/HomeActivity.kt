@@ -560,7 +560,7 @@ class HomeActivity : Activity() {
     }
 
     private fun buildPerf(l: LinearLayout) {
-        for (s in Cat.sections + Catalog2.sections) {
+        for (s in Cat.sections + Catalog2.sections + Catalog3.sections) {
             val c = card(l, s.icon + " " + s.title)
             val acts = ArrayList<TextView>()
             for (x in s.items) {
@@ -752,6 +752,7 @@ class HomeActivity : Activity() {
         updateMaster()
         refreshTabs()
         stagger(0)
+        Finale.install(this)
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
