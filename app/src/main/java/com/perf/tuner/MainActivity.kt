@@ -438,8 +438,8 @@ fun BoostBar(engine: Engine, onDone: () -> Unit) {
     }
     val pad = PaddingValues(4.dp)
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { run(1) }, enabled = !busy, modifi
-               Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
+        Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🚀 آمن", fontSize = 12.sp) }
