@@ -14,13 +14,13 @@ val CATS = listOf(
     "🌐 الشبكة", "🔋 الطاقة", "💾 التخزين", "🎯 الألعاب", "🛠 النظام"
 )
 
-private fun sg(k: String, v: String) = "settings put global $k $v"
-private fun sy(k: String, v: String) = "settings put system $k $v"
-private fun ss(k: String, v: String) = "settings put secure $k $v"
+internal fun sg(k: String, v: String) = "settings put global $k $v"
+internal fun sy(k: String, v: String) = "settings put system $k $v"
+internal fun ss(k: String, v: String) = "settings put secure $k $v"
 private val anim = listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale")
 
 // الفئات 2..9 تُملأ في الدفعات التالية بنفس الصيغة
-val TWEAKS: Map<Int, List<Tweak>> = mapOf(
+private val BASE: Map<Int, List<Tweak>> = mapOf(
     0 to listOf(
         Tweak("أنيميشن 0.5x", "انتقالات أسرع", anim.map { sg(it, "0.5") }),
         Tweak("إيقاف الأنيميشن", "أقصى سرعة بصرية", anim.map { sg(it, "0") }),
@@ -56,6 +56,8 @@ val TWEAKS: Map<Int, List<Tweak>> = mapOf(
             listOf("logcat -G 64K"), listOf("logcat -G 256K"))
     )
 )
+
+val TWEAKS: Map<Int, List<Tweak>> = BASE + MORE
 
 object Shell {
     fun run(cmd: String): Pair<Int, String> = try {
