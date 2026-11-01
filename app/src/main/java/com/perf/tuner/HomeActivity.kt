@@ -560,7 +560,7 @@ class HomeActivity : Activity() {
     }
 
     private fun buildPerf(l: LinearLayout) {
-        for (s in Cat.sections) {
+        for (s in Cat.sections + Catalog2.sections) {
             val c = card(l, s.icon + " " + s.title)
             val acts = ArrayList<TextView>()
             for (x in s.items) {
