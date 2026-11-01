@@ -11,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,7 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         val id = resources.getIdentifier("funk", "raw", packageName)
-        if (id != 0) player = MediaPlayer.create(this, id)?.apply { isLooping = true; setVolume(.12f, .12f) }
+        if (id != 0) player = MediaPlayer.create(this, id)?.apply { isLooping = true; setVolume(.6f, .6f) }
         val engine = Engine(this)
         try {
             if (rikka.shizuku.Shizuku.pingBinder() &&
@@ -75,11 +78,9 @@ fun App(engine: Engine, player: MediaPlayer?) {
     var sel by remember { mutableIntStateOf(0) }
     var ver by remember { mutableIntStateOf(0) }
     val hue = rememberHue()   // لا نقرأ .value هنا حتى لا تُعاد رسم الشاشة كلها
-    Column(
-        Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF0B0B18), Color(0xFF16122E))))
-            .statusBarsPadding()
-    ) {
+    Box(Modifier.fillMaxSize()) {
+    AppBackground()
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Header(hue, player)
         DeviceCard(hue)
         BoostBar(engine) { ver++ }
@@ -93,6 +94,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
             }
         ) { page -> key(ver) { Page(page, engine) } }
         BottomNav(sel, hue) { sel = it }
+    }
     }
 }
 
@@ -253,6 +255,20 @@ fun BoostBar(engine: Engine, onDone: () -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("🚀 تعزيز آمن") }
             OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("♻ استعادة الكل") }
+        }
+    }
+}
+
+@Composable
+fun AppBackground() {
+    val ctx = LocalContext.current
+    val id = remember { ctx.resources.getIdentifier("app_bg", "drawable", ctx.packageName) }
+    Box(Modifier.fillMaxSize().background(Color(0xFF0B0B18))) {
+        if (id != 0) {
+            Image(painterResource(id), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            // تعتيم فوق الصورة حتى تبقى النصوص واضحة (غيّر 0.78 و0.88 لتفتيحها أو تغميقها)
+            Box(Modifier.fillMaxSize().background(
+                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.78f), Color.Black.copy(alpha = 0.88f)))))
         }
     }
 }
