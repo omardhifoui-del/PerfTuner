@@ -73,6 +73,7 @@ private val ACCENT = Color(0xFF7C4DFF)
 @Composable
 fun App(engine: Engine, player: MediaPlayer?) {
     var sel by remember { mutableIntStateOf(0) }
+    var ver by remember { mutableIntStateOf(0) }
     val hue = rememberHue()   // لا نقرأ .value هنا حتى لا تُعاد رسم الشاشة كلها
     Column(
         Modifier.fillMaxSize()
@@ -81,6 +82,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
     ) {
         Header(hue, player)
         DeviceCard(hue)
+        BoostBar(engine) { ver++ }
         TopTabs(sel, hue) { sel = it }
         AnimatedContent(
             targetState = sel, modifier = Modifier.weight(1f), label = "page",
@@ -89,7 +91,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
                 (slideInHorizontally(tween(260)) { it / 4 * d } + fadeIn(tween(260)))
                     .togetherWith(slideOutHorizontally(tween(200)) { -it / 4 * d } + fadeOut(tween(160)))
             }
-        ) { page -> Page(page, engine) }
+        ) { page -> key(ver) { Page(page, engine) } }
         BottomNav(sel, hue) { sel = it }
     }
 }
@@ -204,5 +206,53 @@ fun Signature() {
     )
     Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
         Text("Made by Omar Dhaifawi", style = TextStyle(brush = brush, fontSize = 18.sp, fontWeight = FontWeight.Black))
+    }
+}
+
+// (التبويب، رقم التفعيلة): مجموعة آمنة لا ترفع الحرارة ولا تستهلك البطارية بشكل مبالغ
+private val BOOST = listOf(
+    0 to 0, 0 to 9, 1 to 0, 1 to 1, 1 to 3, 1 to 9,
+    2 to 0, 2 to 1, 2 to 2, 4 to 0, 4 to 1, 5 to 2, 5 to 3
+)
+
+// أوامر مستبعدة من ULTRA لأنها تتعارض مع غيرها أو تضر (حذف ملفات، تغيير مظهر، رفع حرارة بلا فائدة)
+private val EXCL = setOf(
+    0 to 1, 0 to 3, 0 to 4, 0 to 5, 0 to 6, 0 to 7, 0 to 8,
+    1 to 6, 1 to 8, 2 to 3, 2 to 4, 3 to 1, 3 to 2, 5 to 1,
+    6 to 0, 6 to 5, 7 to 1, 7 to 2, 8 to 0, 8 to 1, 8 to 2, 8 to 4, 9 to 0, 9 to 1
+)
+
+@Composable
+fun BoostBar(engine: Engine, onDone: () -> Unit) {
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current
+    var busy by remember { mutableStateOf(false) }
+    fun run(mode: Int) { // 0 آمن، 1 ULTRA، 2 استعادة الكل
+        scope.launch {
+            busy = true
+            val all = TWEAKS.flatMap { (p, l) -> l.indices.map { p to it } }
+            val list = when (mode) { 0 -> BOOST; 1 -> all.filter { it !in EXCL }; else -> all }
+            val n = withContext(Dispatchers.IO) {
+                var c = 0
+                for ((p, i) in list) {
+                    val t = TWEAKS[p]?.getOrNull(i) ?: continue
+                    val id = "$p-$i"
+                    if (mode < 2) { if (engine.apply(t, id)) c++ }
+                    else if (!t.oneShot && engine.isOn(id) && engine.revert(t, id)) c++
+                }
+                c
+            }
+            busy = false; onDone()
+            val label = when (mode) { 0 -> "🚀 طُبّق "; 1 -> "🔥 ULTRA طُبّق "; else -> "♻ استُعيد " }
+            Toast.makeText(ctx, label + (if (mode == 2) "$n" else "$n / ${list.size}"), Toast.LENGTH_LONG).show()
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("🚀 تعزيز آمن") }
+            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("♻ استعادة الكل") }
+        }
     }
 }
