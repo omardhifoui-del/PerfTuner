@@ -47,5 +47,39 @@ val MORE: Map<Int, List<Tweak>> = mapOf(
         Tweak("إيقاف التوفير الديناميكي", "", listOf(sg("dynamic_power_savings_enabled", "0"))),
         Tweak("سطوع يدوي", "إيقاف السطوع التلقائي", listOf(sy("screen_brightness_mode", "0"))),
         Tweak("إيقاف العرض الدائم", "يوفر بطارية", listOf(ss("doze_always_on", "0")))
+    ),
+    2 to listOf(
+        Tweak("تجميد التطبيقات المخبأة", "App Freezer؛ يوفر المعالج (أندرويد 11+)",
+            listOf(sg("cached_apps_freezer", "enabled")), listOf(sg("cached_apps_freezer", "disabled"))),
+        Tweak("ضغط ذاكرة العمليات", "Compaction؛ يحرر ذاكرة الخلفية",
+            listOf("cmd device_config put activity_manager use_compaction true"),
+            listOf("cmd device_config delete activity_manager use_compaction")),
+        Tweak("قتل العمليات المخبأة الآن", "تنفيذ لمرة واحدة", listOf("am kill-all"), oneShot = true),
+        Tweak("تجميع التطبيقات speed-profile", "أسرع وأخف من speed؛ يأخذ وقتاً",
+            listOf("cmd package compile -m speed-profile -a"), oneShot = true),
+        Tweak("تجميع التطبيقات speed (بطيء)", "أقصى تحسين؛ قد يستغرق دقائق طويلة",
+            listOf("cmd package compile -m speed -a"), oneShot = true)
+    ),
+    7 to listOf(
+        Tweak("صيانة التخزين الآن", "sm idle-maint", listOf("sm idle-maint run"), oneShot = true),
+        Tweak("مسح كاش الملفات الخارجية", "مجلدات cache فقط", listOf("rm -rf /sdcard/Android/data/*/cache/*"), oneShot = true),
+        Tweak("حذف الصور المصغرة", "تُعاد عند فتح المعرض", listOf("rm -rf /sdcard/DCIM/.thumbnails"), oneShot = true),
+        Tweak("مسح سجلات logcat", "تفريغ المخزن", listOf("logcat -c"), oneShot = true),
+        Tweak("مسح كاش كل التطبيقات", "pm trim-caches", listOf("pm trim-caches 999G"), oneShot = true)
+    ),
+    8 to listOf(
+        Tweak("عدم الإزعاج (أولوية)", "يمنع المقاطعات أثناء اللعب", listOf(sg("zen_mode", "1"))),
+        Tweak("إيقاف إشعارات الأعلى", "لا نوافذ منبثقة أثناء اللعب", listOf(sg("heads_up_notifications_enabled", "0"))),
+        Tweak("إخفاء نوافذ أخطاء التطبيقات", "يخفي العرض فقط ولا يصلح المشكلة", listOf(sg("hide_error_dialogs", "1"))),
+        Tweak("إخفاء ANR الخلفي", "", listOf(ss("anr_show_background", "0"))),
+        Tweak("قفل تدوير الشاشة", "", listOf(sy("accelerometer_rotation", "0"))),
+        Tweak("إيقاف شاشة التوقف", "", listOf(ss("screensaver_enabled", "0")))
+    ),
+    9 to listOf(
+        Tweak("خيارات المطور", "تفعيل القائمة", listOf(sg("development_settings_enabled", "1"))),
+        Tweak("تفعيل ADB", "التصحيح عبر USB", listOf(sg("adb_enabled", "1"))),
+        Tweak("إيقاف سجل بدء الأنشطة", "تقليل الكتابة", listOf(sg("activity_starts_logging_enabled", "0"))),
+        Tweak("إيقاف الاستيقاظ بالرفع", "", listOf(ss("wake_gesture_enabled", "0"))),
+        Tweak("إيقاف إرسال أخطاء التطبيقات", "", listOf(sg("send_action_app_error", "0")))
     )
 )
