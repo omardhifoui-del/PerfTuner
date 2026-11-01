@@ -6,8 +6,12 @@ import rikka.shizuku.Shizuku
 data class Tweak(
     val title: String, val desc: String,
     val on: List<String>, val off: List<String> = emptyList(),
-    val oneShot: Boolean = false
-)
+    val oneShot: Boolean = false,
+    val ultra: Boolean = true,      // هل يدخل ضمن زر ULTRA
+    val report: Boolean = false     // يعرض نتيجة أمر بدل تعديل شيء
+) {
+    val perPkg get() = on.any { "{pkg}" in it } || off.any { "{pkg}" in it }
+}
 
 val CATS = listOf(
     "🖥 الشاشة", "🧠 الذاكرة", "⚙ المعالج", "🎮 GPU", "👆 اللمس",
@@ -57,7 +61,7 @@ private val BASE: Map<Int, List<Tweak>> = mapOf(
     )
 )
 
-val TWEAKS: Map<Int, List<Tweak>> = BASE + MORE
+val TWEAKS: Map<Int, List<Tweak>> = (0..9).associateWith { BASE[it].orEmpty() + MORE[it].orEmpty() + MORE2[it].orEmpty() }
 
 object Shell {
     fun run(cmd: String): Pair<Int, String> = try {
@@ -75,18 +79,29 @@ class Engine(ctx: Context) {
     private val rx = Regex("""settings put (\w+) (\S+) (\S+)""")
 
     fun isOn(id: String) = sp.getBoolean("on_$id", false)
+    fun pkgs(): List<String> = (sp.getString("pkgs", "") ?: "")
+        .split(',', ' ', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+    fun setPkgs(s: String) { sp.edit().putString("pkgs", s).apply() }
+    private fun expand(c: String): List<String> =
+        if ("{pkg}" in c) pkgs().map { c.replace("{pkg}", it) } else listOf(c)
+    fun report(cmd: String): String = Shell.run(cmd).second.ifBlank { "(لا توجد نتائج)" }
 
-    /** ينفذ الأوامر مع حفظ القيمة الأصلية والتحقق منها. يرجع true عند النجاح */
+    /** ينفذ كل الأوامر (حتى لو فشل بعضها) مع حفظ القيم الأصلية. true = نجح الجميع */
     fun apply(t: Tweak, id: String): Boolean {
         var ok = true
-        for (c in t.on) {
+        for (c0 in t.on) for (c in expand(c0)) {
             val m = rx.find(c)
             if (m != null) {
                 val (ns, k, v) = m.destructured
                 val key = "b_${ns}_$k"
                 if (!sp.contains(key)) sp.edit().putString(key, Shell.run("settings get $ns $k").second).apply()
-                ok = ok && Shell.run(c).first == 0 && Shell.run("settings get $ns $k").second == v
-            } else ok = ok && Shell.run(c).first == 0
+                val r1 = Shell.run(c).first == 0
+                val r2 = Shell.run("settings get $ns $k").second == v
+                ok = ok && r1 && r2
+            } else {
+                val r = Shell.run(c).first == 0
+                ok = ok && r
+            }
         }
         if (ok && !t.oneShot) sp.edit().putBoolean("on_$id", true).apply()
         return ok
@@ -101,7 +116,10 @@ class Engine(ctx: Context) {
             ok = ok && r.first == 0
             sp.edit().remove("b_${ns}_$k").apply()
         }
-        for (c in t.off) ok = ok && Shell.run(c).first == 0
+        for (c0 in t.off) for (c in expand(c0)) {
+            val r = Shell.run(c).first == 0
+            ok = ok && r
+        }
         if (ok) sp.edit().putBoolean("on_$id", false).apply()
         return ok
     }
