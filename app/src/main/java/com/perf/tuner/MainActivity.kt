@@ -2,6 +2,8 @@ package com.perf.tuner
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +20,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +41,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -156,7 +161,38 @@ fun DeviceCard(hue: State<Float>) {
         Text("📱 ${Build.MANUFACTURER} ${Build.MODEL}", color = hc(h), fontWeight = FontWeight.Bold)
         Text("Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})  •  ${Build.HARDWARE}", color = Color.White, fontSize = 12.sp)
         Text("🧠 RAM ${mi.totalMem / 1048576} MB  •  ⚙ ${Runtime.getRuntime().availableProcessors()} cores", color = Color.White, fontSize = 12.sp)
+        LiveLine()
     }
+}
+
+@Composable
+fun LiveLine() {
+    val ctx = LocalContext.current
+    var line by remember { mutableStateOf("⚡ جارٍ القياس...") }
+    LaunchedEffect(Unit) {
+        var pt = 0L; var pi = 0L
+        while (true) {
+            line = withContext(Dispatchers.IO) {
+                var cpu = -1
+                val p = Shell.run("head -n1 /proc/stat").second.trim().split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
+                if (p.size >= 8) {
+                    val idle = p[3] + p[4]; val tot = p.take(8).sum()
+                    val dt = tot - pt; val di = idle - pi
+                    if (pt > 0 && dt > 0) cpu = ((dt - di) * 100 / dt).toInt()
+                    pt = tot; pi = idle
+                }
+                val mi = ActivityManager.MemoryInfo()
+                (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mi)
+                val used = (mi.totalMem - mi.availMem) / 1048576
+                val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val temp = (b?.getIntExtra("temperature", 0) ?: 0) / 10f
+                val lvl = b?.getIntExtra("level", 0) ?: 0
+                "⚡ CPU " + (if (cpu >= 0) "$cpu%" else "--") + "  •  RAM ${used}MB  •  🌡 ${temp}°C  •  🔋 $lvl%"
+            }
+            delay(3000)
+        }
+    }
+    Text(line, color = Color(0xFF7CFFB2), fontSize = 12.sp, fontWeight = FontWeight.Bold)
 }
 
 @Composable
@@ -164,6 +200,13 @@ fun Page(page: Int, engine: Engine) {
     val list = TWEAKS[page].orEmpty()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text(CATS[page], color = ACCENT, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        if (page == 8) item {
+            var v by remember { mutableStateOf(engine.pkgs().joinToString(", ")) }
+            OutlinedTextField(
+                value = v, onValueChange = { v = it; engine.setPkgs(it) }, modifier = Modifier.fillMaxWidth(),
+                label = { Text("حزم الألعاب/التطبيقات (افصل بفاصلة)") }, placeholder = { Text("com.tencent.ig") }
+            )
+        }
         if (list.isEmpty()) item { Text("تُضاف تفعيلات هذا التبويب لاحقاً", color = Color.Gray) }
         items(list.size) { i -> TweakRow("$page-$i", list[i], engine) }
         item { Signature() }
@@ -175,7 +218,14 @@ fun TweakRow(id: String, t: Tweak, engine: Engine) {
     val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     var on by remember { mutableStateOf(engine.isOn(id)) }
     var busy by remember { mutableStateOf(false) }
-    fun toast(ok: Boolean) = Toast.makeText(ctx, if (ok) "✔ تم" else "✘ فشل على هذا الجهاز", Toast.LENGTH_SHORT).show()
+    var dlg by remember { mutableStateOf<String?>(null) }
+    fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_SHORT).show()
+    fun result(ok: Boolean) = toast(if (ok) "✔ تم" else "✘ فشل أو غير مدعوم على هذا الجهاز")
+    fun needPkg(): Boolean {
+        val miss = t.perPkg && engine.pkgs().isEmpty()
+        if (miss) toast("اكتب حزمة اللعبة أولاً في تبويب الألعاب")
+        return miss
+    }
     Row(
         Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -184,16 +234,27 @@ fun TweakRow(id: String, t: Tweak, engine: Engine) {
             Text(t.title, color = Color.White, fontWeight = FontWeight.Bold)
             if (t.desc.isNotEmpty()) Text(t.desc, color = Color.Gray, fontSize = 12.sp)
         }
-        if (t.oneShot) Button(enabled = !busy, onClick = {
-            scope.launch { busy = true; val ok = withContext(Dispatchers.IO) { engine.apply(t, id) }; busy = false; toast(ok) }
+        if (t.report) Button(enabled = !busy, onClick = {
+            scope.launch { busy = true; val o = withContext(Dispatchers.IO) { engine.report(t.on.first()) }; busy = false; dlg = o }
+        }) { Text("عرض") }
+        else if (t.oneShot) Button(enabled = !busy, onClick = {
+            if (!needPkg()) scope.launch { busy = true; val ok = withContext(Dispatchers.IO) { engine.apply(t, id) }; busy = false; result(ok) }
         }) { Text("تنفيذ") }
         else Switch(checked = on, enabled = !busy, onCheckedChange = { v ->
-            scope.launch {
+            if (!needPkg()) scope.launch {
                 busy = true
                 val ok = withContext(Dispatchers.IO) { if (v) engine.apply(t, id) else engine.revert(t, id) }
-                if (ok) on = v; busy = false; toast(ok)
+                if (ok) on = v; busy = false; result(ok)
             }
         }, colors = SwitchDefaults.colors(checkedTrackColor = ACCENT))
+    }
+    dlg?.let { out ->
+        AlertDialog(
+            onDismissRequest = { dlg = null },
+            confirmButton = { TextButton(onClick = { dlg = null }) { Text("إغلاق") } },
+            title = { Text(t.title, fontSize = 15.sp) },
+            text = { Text(out, Modifier.verticalScroll(rememberScrollState()), fontSize = 11.sp) }
+        )
     }
 }
 
@@ -228,33 +289,50 @@ private val EXCL = setOf(
 fun BoostBar(engine: Engine, onDone: () -> Unit) {
     val scope = rememberCoroutineScope(); val ctx = LocalContext.current
     var busy by remember { mutableStateOf(false) }
-    fun run(mode: Int) { // 0 آمن، 1 ULTRA، 2 استعادة الكل
+    fun run(mode: Int) { // 0 آمن، 1 ULTRA، 2 استعادة، 3 تحرير RAM، 4 مسح الكاش
         scope.launch {
             busy = true
             val all = TWEAKS.flatMap { (p, l) -> l.indices.map { p to it } }
-            val list = when (mode) { 0 -> BOOST; 1 -> all.filter { it !in EXCL }; else -> all }
+            val list = when (mode) {
+                0 -> BOOST
+                1 -> all.filter { k -> k !in EXCL && TWEAKS[k.first]!![k.second].let { t -> t.ultra && !t.report && !t.perPkg } }
+                2 -> all
+                else -> emptyList()
+            }
             val n = withContext(Dispatchers.IO) {
                 var c = 0
-                for ((p, i) in list) {
-                    val t = TWEAKS[p]?.getOrNull(i) ?: continue
-                    val id = "$p-$i"
-                    if (mode < 2) { if (engine.apply(t, id)) c++ }
-                    else if (!t.oneShot && engine.isOn(id) && engine.revert(t, id)) c++
+                when (mode) {
+                    3 -> Shell.run("am kill-all")
+                    4 -> Shell.run("pm trim-caches 999G")
+                    else -> for ((p, i) in list) {
+                        val t = TWEAKS[p]?.getOrNull(i) ?: continue
+                        val id = "$p-$i"
+                        if (mode < 2) { if (engine.apply(t, id)) c++ }
+                        else if (!t.oneShot && !t.report && engine.isOn(id) && engine.revert(t, id)) c++
+                    }
                 }
                 c
             }
             busy = false; onDone()
-            val label = when (mode) { 0 -> "🚀 طُبّق "; 1 -> "🔥 ULTRA طُبّق "; else -> "♻ استُعيد " }
-            Toast.makeText(ctx, label + (if (mode == 2) "$n" else "$n / ${list.size}"), Toast.LENGTH_LONG).show()
+            val msg = when (mode) {
+                0 -> "🚀 طُبّق $n / ${list.size}"
+                1 -> "🔥 ULTRA طُبّق $n / ${list.size}"
+                2 -> "♻ استُعيد $n"
+                3 -> "🧠 حُرِّرت الذاكرة"
+                else -> "🧹 مُسح الكاش"
+            }
+            Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
         }
     }
     Column(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("🚀 تعزيز آمن") }
-            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("♻ استعادة الكل") }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🚀 آمن", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(3) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🧠 RAM", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(4) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("🧹 كاش", fontSize = 12.sp) }
+            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = PaddingValues(4.dp)) { Text("♻ استعادة", fontSize = 12.sp) }
         }
     }
 }
