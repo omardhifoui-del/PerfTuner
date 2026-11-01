@@ -18,7 +18,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
 }
 dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
