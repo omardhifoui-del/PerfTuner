@@ -44,6 +44,11 @@ class MainActivity : ComponentActivity() {
         val id = resources.getIdentifier("funk", "raw", packageName)
         if (id != 0) player = MediaPlayer.create(this, id)?.apply { isLooping = true; setVolume(.12f, .12f) }
         val engine = Engine(this)
+        try {
+            if (rikka.shizuku.Shizuku.pingBinder() &&
+                rikka.shizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) rikka.shizuku.Shizuku.requestPermission(0)
+        } catch (_: Throwable) {}
         setContent {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 MaterialTheme(colorScheme = darkColorScheme()) { App(engine, player) }
