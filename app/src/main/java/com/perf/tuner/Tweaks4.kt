@@ -8,6 +8,9 @@ private fun N(
 /** مجموعة خيارات: كل خيار أمر، و«الافتراضي» يستخدم أمر reset */
 data class Choice(val title: String, val desc: String, val opts: List<Pair<String, String>>, val reset: String)
 
+private fun scale(p: Int) =
+    "S=\$(wm size | grep -o '[0-9]*x[0-9]*' | head -n1); W=\${S%x*}; H=\${S#*x}; wm size \$((W*$p/100))x\$((H*$p/100))"
+
 private val SOCIAL = "com.facebook.katana com.instagram.android com.zhiliaoapp.musically com.google.android.youtube com.snapchat.android com.twitter.android"
 
 val MORE3: Map<Int, List<Tweak>> = mapOf(
@@ -54,7 +57,9 @@ val CHOICES: Map<Int, List<Choice>> = mapOf(
     0 to listOf(
         Choice("ألوان زاهية", "تشبّع الألوان؛ قد يكلّف FPS على المعالجات الضعيفة",
             listOf("1.1", "1.2", "1.3", "1.5").map { it to "service call SurfaceFlinger 1022 f $it" },
-            "service call SurfaceFlinger 1022 f 1.0")
+            "service call SurfaceFlinger 1022 f 1.0"),
+        Choice("دقة الشاشة (Universal Scale)", "يخفف حمل GPU؛ الصورة أقل حدة. «افتراضي» يعيد الدقة الأصلية",
+            listOf(90, 80, 70, 60).map { "$it%" to scale(it) }, "wm size reset")
     ),
     4 to listOf(
         Choice("ضغطة طويلة (ms)", "",
