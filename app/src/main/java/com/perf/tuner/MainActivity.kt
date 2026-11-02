@@ -22,6 +22,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -284,6 +285,9 @@ fun Page(page: Int, engine: Engine, onBoost: () -> Unit) {
                 label = { Text("حزم الألعاب/التطبيقات (افصل بفاصلة)") }, placeholder = { Text("com.tencent.ig") }
             )
         }
+        if (page == 0) item { DpiCard(engine) }
+        if (page == 8) item { GameWatchRow(engine) }
+        for (ch in CHOICES[page].orEmpty()) item { ChoiceCard(ch, engine) }
         if (list.isEmpty()) item { Text("تُضاف تفعيلات هذا التبويب لاحقاً", color = Color.Gray) }
         items(list.size) { i -> TweakRow("$page-$i", list[i], engine) }
         item { Signature() }
@@ -312,7 +316,7 @@ fun TweakRow(id: String, t: Tweak, engine: Engine) {
             if (t.desc.isNotEmpty()) Text(t.desc, color = Color.Gray, fontSize = 12.sp)
         }
         if (t.report) Button(enabled = !busy, onClick = {
-            scope.launch { busy = true; val o = withContext(Dispatchers.IO) { engine.report(t.on.first()) }; busy = false; dlg = o }
+            if (!needPkg()) scope.launch { busy = true; val o = withContext(Dispatchers.IO) { engine.report(t.on.first()) }; busy = false; dlg = o }
         }) { Text("عرض") }
         else if (t.oneShot) Button(enabled = !busy, onClick = {
             if (!needPkg()) scope.launch { busy = true; val ok = withContext(Dispatchers.IO) { engine.apply(t, id) }; busy = false; result(ok) }
@@ -403,6 +407,10 @@ private fun restoreAll(engine: Engine): Int {
     for ((p, i) in allIdx()) {
         val t = TWEAKS[p]!![i]; val id = "$p-$i"
         if (!t.oneShot && !t.report && engine.isOn(id) && engine.revert(t, id)) c++
+    }
+    for (ch in CHOICES.values.flatten()) if (engine.choiceSel(ch.title).isNotEmpty()) {
+        if (engine.runCmd(ch.reset)) c++
+        engine.setChoiceSel(ch.title, "")
     }
     return c
 }
@@ -578,5 +586,96 @@ fun AppBackground() {
             Box(Modifier.fillMaxSize().background(
                 Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.78f), Color.Black.copy(alpha = 0.88f)))))
         }
+    }
+}
+
+@Composable
+fun ChoiceCard(ch: Choice, engine: Engine) {
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current
+    var sel by remember { mutableStateOf(engine.choiceSel(ch.title)) }
+    var busy by remember { mutableStateOf(false) }
+    fun pick(label: String, cmd: String) {
+        if (cmd.contains("{pkg}") && engine.pkgs().isEmpty()) {
+            Toast.makeText(ctx, "اكتب حزمة اللعبة أولاً في تبويب الألعاب", Toast.LENGTH_SHORT).show(); return
+        }
+        scope.launch {
+            busy = true
+            val ok = withContext(Dispatchers.IO) { engine.runCmd(cmd) }
+            busy = false
+            if (ok) { sel = label; engine.setChoiceSel(ch.title, label) }
+            Toast.makeText(ctx, if (ok) "✔ تم" else "✘ فشل أو غير مدعوم", Toast.LENGTH_SHORT).show()
+        }
+    }
+    Column(Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+        Text(ch.title, color = Color.White, fontWeight = FontWeight.Bold)
+        if (ch.desc.isNotEmpty()) Text(ch.desc, color = Color.Gray, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val all = listOf("افتراضي" to ch.reset) + ch.opts
+            for ((label, cmd) in all) {
+                val on = if (label == "افتراضي") sel.isEmpty() else sel == label
+                OutlinedButton(
+                    enabled = !busy, onClick = { pick(if (label == "افتراضي") "" else label, cmd) },
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = if (on) ACCENT.copy(alpha = .4f) else Color.Transparent),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) { Text(label, fontSize = 12.sp, color = Color.White) }
+            }
+        }
+    }
+}
+
+@Composable
+fun DpiCard(engine: Engine) {
+    val scope = rememberCoroutineScope(); val ctx = LocalContext.current
+    var left by remember { mutableIntStateOf(0) }
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun test(d: Int) {
+        job?.cancel()
+        job = scope.launch {
+            withContext(Dispatchers.IO) { Shell.run("wm density $d") }
+            left = 15
+            while (left > 0) { delay(1000); left-- }
+            withContext(Dispatchers.IO) { Shell.run("wm density reset") }
+            Toast.makeText(ctx, "رجعت الكثافة الأصلية", Toast.LENGTH_SHORT).show()
+        }
+    }
+    Column(Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+        Text("🔍 DPI مخصص", color = Color.White, fontWeight = FontWeight.Bold)
+        Text("كل تجربة تدوم 15 ثانية وترجع وحدها إن لم تضغط «تثبيت». أقل = عناصر أصغر، أعلى = أكبر.", color = Color.Gray, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (d in listOf(240, 280, 320, 360, 400)) OutlinedButton(onClick = { test(d) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                Text("$d", fontSize = 12.sp, color = Color.White)
+            }
+            OutlinedButton(onClick = {
+                job?.cancel(); left = 0
+                scope.launch { withContext(Dispatchers.IO) { Shell.run("wm density reset") } }
+            }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) { Text("الأصلي", fontSize = 12.sp, color = Color.White) }
+        }
+        if (left > 0) {
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = { job?.cancel(); left = 0; Toast.makeText(ctx, "✔ ثُبّتت", Toast.LENGTH_SHORT).show() }, modifier = Modifier.fillMaxWidth()) {
+                Text("✔ تثبيت ($left)")
+            }
+        }
+    }
+}
+
+@Composable
+fun GameWatchRow(engine: Engine) {
+    var on by remember { mutableStateOf(GameWatcher.running) }
+    Row(
+        Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("🎯 كشف الألعاب تلقائياً", color = Color.White, fontWeight = FontWeight.Bold)
+            Text("عند فتح لعبة من حزمك: عدم إزعاج، أولوية، Game Mode، قفل تدوير… وتُستعاد عند الخروج. يعمل ما دام التطبيق حياً في الخلفية.",
+                color = Color.Gray, fontSize = 12.sp)
+        }
+        Switch(checked = on, onCheckedChange = { v ->
+            on = v
+            if (v) GameWatcher.start(engine) else GameWatcher.stop(engine)
+        }, colors = SwitchDefaults.colors(checkedTrackColor = ACCENT))
     }
 }
