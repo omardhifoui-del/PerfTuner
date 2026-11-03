@@ -718,7 +718,17 @@ private val PERF_CMDS = listOf(
     "settings put system multicore_packet_scheduler 1",
     "settings put global sem_enhanced_cpu_responsiveness 1",
     "settings put system k2hd_effect 1",
-    "settings put system tube_amp_effect 1"
+    "settings put system tube_amp_effect 1",
+    "settings put system max_events_per_second 300",
+    "settings put system max_pointer_events_per_second 300",
+    "settings put system touch_pressure_scale 0.55",
+    "settings put system touch_distance_scale 0.40",
+    "settings put system touch_filter_enable 1",
+    "settings put system touch_noise_suppression 1",
+    "settings put system touch_jitter_suppression 1",
+    "settings put system touch_filter_deadzone_radius 0.1",
+    "settings put system touch_area_filtering_enable 1",
+    "settings put global force_gpu_rendering 1"
 )
 
 // كل أمر تفعيلة مستقلة: يفشل أحدها (مثل مفاتيح سامسونج) دون أن يوقف الباقي، والأوامر غير settings لها عكس
@@ -784,7 +794,7 @@ fun PerfOptButton(engine: Engine, onDone: () -> Unit) {
                 fontSize = 17.sp, fontWeight = FontWeight.Black,
                 style = TextStyle(shadow = Shadow(Color(0xFF00E5FF), blurRadius = 16f))
             )
-            Text(if (on) "ON ✔  اضغط للإيقاف والاستعادة" else "20 أمراً بضغطة واحدة", color = Color(0xFF9FD3FF), fontSize = 11.sp)
+            Text(if (on) "ON ✔  اضغط للإيقاف والاستعادة" else "${PERF_OPT.size} أمراً بضغطة واحدة", color = Color(0xFF9FD3FF), fontSize = 11.sp)
         }
     }
     report?.let { rp ->
