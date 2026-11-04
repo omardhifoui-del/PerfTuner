@@ -17,6 +17,10 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
@@ -98,6 +102,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
     var sel by remember { mutableIntStateOf(0) }
     var ver by remember { mutableIntStateOf(0) }
     val hue = rememberHue()   // لا نقرأ .value هنا حتى لا تُعاد رسم الشاشة كلها
+    CompositionLocalProvider(LocalHue provides hue) {
     Box(Modifier.fillMaxSize()) {
     AppBackground()
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -118,6 +123,7 @@ fun App(engine: Engine, player: MediaPlayer?) {
             }
         ) { page -> key(ver) { Page(page, engine) { ver++ } } }
         BottomNav(sel, hue) { sel = it }
+    }
     }
     }
 }
@@ -144,24 +150,51 @@ fun TopTabs(sel: Int, hue: State<Float>, onSel: (Int) -> Unit) {
 
 @Composable
 fun BottomNav(sel: Int, hue: State<Float>, onSel: (Int) -> Unit) {
-    val c = ACCENT
-    NavigationBar(containerColor = Color(0xFF0E0C20)) {
-        for (i in 0..4) NavigationBarItem(
-            selected = sel == i, onClick = { onSel(i) },
-            icon = { Text(CATS[i].substringBefore(' '), fontSize = 20.sp) },
-            label = { Text(CATS[i].substringAfter(' '), fontSize = 10.sp) },
-            colors = NavigationBarItemDefaults.colors(indicatorColor = c.copy(alpha = .25f))
-        )
+    val pos = animateFloatAsState(if (sel in 0..4) sel.toFloat() else 0f, spring(dampingRatio = 0.6f, stiffness = 360f), label = "lens")
+    val show = animateFloatAsState(if (sel in 0..4) 1f else 0f, tween(220), label = "lensShow")
+    Row(
+        Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().height(66.dp)
+            .glass(33.dp, hue)
+            .drawBehind {
+                val w = size.width / 5f
+                val rtl = layoutDirection == LayoutDirection.Rtl
+                val x = if (rtl) size.width - (pos.value + 1f) * w else pos.value * w
+                val pad = 5.dp.toPx(); val s = show.value
+                val tl = Offset(x + pad, pad); val sz = Size(w - 2 * pad, size.height - 2 * pad)
+                val r = CornerRadius(28.dp.toPx())
+                drawRoundRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = .40f * s), Color.White.copy(alpha = .12f * s))), tl, sz, r)
+                drawRoundRect(Brush.linearGradient(listOf(Color.White.copy(alpha = .95f * s), Color.White.copy(alpha = .15f * s), Color.White.copy(alpha = .6f * s))), tl, sz, r, style = Stroke(1.6.dp.toPx()))
+            },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0..4) NavItem(i, sel == i, Modifier.weight(1f)) { onSel(i) }
+    }
+}
+
+@Composable
+fun NavItem(i: Int, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val sc = animateFloatAsState(if (selected) 1.2f else 1f, spring(dampingRatio = 0.55f, stiffness = 420f), label = "navScale")
+    Column(
+        modifier.fillMaxHeight().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+    ) {
+        Text(CATS[i].substringBefore(' '), fontSize = 22.sp, modifier = Modifier.graphicsLayer { scaleX = sc.value; scaleY = sc.value })
+        Text(CATS[i].substringAfter(' '), fontSize = 10.sp, color = if (selected) Color.White else Color(0xFFB8B3D9),
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
     }
 }
 
 @Composable
 fun Chip(text: String, selected: Boolean, c: Color, m: Modifier, onClick: () -> Unit) {
-    val bg = if (selected) c.copy(alpha = .3f) else Color.White.copy(alpha = .06f)
+    val shape = RoundedCornerShape(14.dp)
     Box(
-        m.clip(RoundedCornerShape(12.dp)).background(bg).clickable { onClick() }.padding(vertical = 8.dp),
+        m.then(if (selected) Modifier.glass(14.dp, LocalHue.current) else Modifier.glass(14.dp))
+            .clip(shape).clickable { onClick() }.padding(vertical = 9.dp),
         contentAlignment = Alignment.Center
-    ) { Text(text.substringAfter(' '), fontSize = 11.sp, color = Color.White, maxLines = 1) }
+    ) {
+        Text(text.substringAfter(' '), fontSize = 11.sp, color = Color.White,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+    }
 }
 
 private data class Sys(
@@ -202,12 +235,7 @@ fun DeviceCard(hue: State<Float>) {
     val gb = 1073741824.0
     Column(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth()
-            .drawBehind {
-                val h = hue.value                       // يُقرأ في مرحلة الرسم فقط → لا إعادة تركيب
-                val r = CornerRadius(18.dp.toPx())
-                drawRoundRect(Brush.linearGradient(listOf(hc(h, 200f).copy(alpha = .35f), hc(h, 320f).copy(alpha = .35f))), cornerRadius = r)
-                drawRoundRect(Brush.linearGradient(listOf(hc(h), hc(h, 120f), hc(h, 240f))), cornerRadius = r, style = Stroke(2.dp.toPx()))
-            }
+            .glass(18.dp, hue)
             .padding(10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +273,7 @@ fun DeviceCard(hue: State<Float>) {
 @Composable
 fun RowScope.Tile(label: String, value: String, frac: Float?, c: Color) {
     Column(
-        Modifier.weight(1f).background(Color.White.copy(alpha = .12f), RoundedCornerShape(12.dp)).padding(8.dp),
+        Modifier.weight(1f).glass(12.dp).padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(label, color = Color.White.copy(alpha = .8f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -326,7 +354,7 @@ fun TweakRow(id: String, t: Tweak, engine: Engine) {
         return miss
     }
     Row(
-        Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp),
+        Modifier.fillMaxWidth().glass(14.dp).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -348,7 +376,7 @@ fun TweakRow(id: String, t: Tweak, engine: Engine) {
         }, colors = SwitchDefaults.colors(checkedTrackColor = ACCENT))
     }
     dlg?.let { out ->
-        AlertDialog(
+        GlassAlert(
             onDismissRequest = { dlg = null },
             confirmButton = { TextButton(onClick = { dlg = null }) { Text("إغلاق") } },
             title = { Text(t.title, fontSize = 15.sp) },
@@ -464,18 +492,16 @@ fun BoostBar(engine: Engine, onDone: () -> Unit) {
     }
     val pad = PaddingValues(4.dp)
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { run(1) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-            Text(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", fontWeight = FontWeight.Black)
+        GlassButton(if (busy) "جارٍ التنفيذ..." else "🔥 ULTRA PERFORMANCE", Modifier.fillMaxWidth(), !busy) { run(1) }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            GlassButton("🚀 آمن", Modifier.weight(1f), !busy) { run(0) }
+            GlassButton("🧠 RAM", Modifier.weight(1f), !busy) { run(3) }
+            GlassButton("🧹 كاش", Modifier.weight(1f), !busy) { run(4) }
+            GlassButton("♻ استعادة", Modifier.weight(1f), !busy) { run(2) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick = { run(0) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🚀 آمن", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(3) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🧠 RAM", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(4) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🧹 كاش", fontSize = 12.sp) }
-            OutlinedButton(onClick = { run(2) }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("♻ استعادة", fontSize = 12.sp) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            OutlinedButton(onClick = { showProfiles = true }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("🎛 ملفات وتحليل", fontSize = 12.sp) }
-            OutlinedButton(onClick = { showRam = true }, enabled = !busy, modifier = Modifier.weight(1f), contentPadding = pad) { Text("📊 RAM Booster", fontSize = 12.sp) }
+            GlassButton("🎛 ملفات وتحليل", Modifier.weight(1f), !busy) { showProfiles = true }
+            GlassButton("📊 RAM Booster", Modifier.weight(1f), !busy) { showRam = true }
         }
     }
     if (showProfiles) ProfilesDialog(engine, { showProfiles = false }, onDone)
@@ -500,7 +526,7 @@ fun ProfilesDialog(engine: Engine, onDismiss: () -> Unit, onDone: () -> Unit) {
             )
         }
     }
-    AlertDialog(
+    GlassAlert(
         onDismissRequest = onDismiss,
         title = { Text("تحليل الجهاز والملفات", fontSize = 16.sp) },
         text = {
@@ -555,7 +581,7 @@ fun RamBoosterDialog(onDismiss: () -> Unit) {
             }.distinctBy { it.first }.take(12)
         }
     }
-    AlertDialog(
+    GlassAlert(
         onDismissRequest = onDismiss,
         title = { Text("📊 RAM Booster", fontSize = 16.sp) },
         text = {
@@ -602,8 +628,18 @@ fun AppBackground() {
             Image(painterResource(id), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             // تعتيم فوق الصورة حتى تبقى النصوص واضحة (غيّر 0.78 و0.88 لتفتيحها أو تغميقها)
             Box(Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.78f), Color.Black.copy(alpha = 0.88f)))))
+                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.70f), Color.Black.copy(alpha = 0.82f)))))
         }
+        val hue = LocalHue.current
+        Box(Modifier.fillMaxSize().drawBehind {
+            val h = hue.value
+            val w = size.width; val ht = size.height
+            fun blob(c: Color, x: Float, y: Float, r: Float) =
+                drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), center = Offset(x, y), radius = r), radius = r, center = Offset(x, y))
+            blob(hc(h).copy(alpha = .30f), w * .15f, ht * .15f, w * .8f)
+            blob(hc(h, 140f).copy(alpha = .26f), w * .9f, ht * .55f, w * .85f)
+            blob(hc(h, 260f).copy(alpha = .24f), w * .3f, ht * .98f, w * .8f)
+        })
     }
 }
 
@@ -624,7 +660,7 @@ fun ChoiceCard(ch: Choice, engine: Engine) {
             Toast.makeText(ctx, if (ok) "✔ تم" else "✘ فشل أو غير مدعوم", Toast.LENGTH_SHORT).show()
         }
     }
-    Column(Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().glass(14.dp).padding(12.dp)) {
         Text(ch.title, color = Color.White, fontWeight = FontWeight.Bold)
         if (ch.desc.isNotEmpty()) Text(ch.desc, color = Color.Gray, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -657,7 +693,7 @@ fun DpiCard(engine: Engine) {
             Toast.makeText(ctx, "رجعت الكثافة الأصلية", Toast.LENGTH_SHORT).show()
         }
     }
-    Column(Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().glass(14.dp).padding(12.dp)) {
         Text("🔍 DPI مخصص", color = Color.White, fontWeight = FontWeight.Bold)
         Text("كل تجربة تدوم 15 ثانية وترجع وحدها إن لم تضغط «تثبيت». أقل = عناصر أصغر، أعلى = أكبر.", color = Color.Gray, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
@@ -683,7 +719,7 @@ fun DpiCard(engine: Engine) {
 fun GameWatchRow(engine: Engine) {
     var on by remember { mutableStateOf(GameWatcher.running) }
     Row(
-        Modifier.fillMaxWidth().background(Color.White.copy(alpha = .06f), RoundedCornerShape(14.dp)).padding(12.dp),
+        Modifier.fillMaxWidth().glass(14.dp).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
@@ -763,7 +799,7 @@ fun PerfOptButton(engine: Engine, onDone: () -> Unit) {
                 )
             }
             .clip(RoundedCornerShape(28.dp))
-            .background(Color(0xFF14102B))
+            .background(Brush.verticalGradient(listOf(Color(0xFF2A2350).copy(alpha = .75f), Color(0xFF14102B).copy(alpha = .6f))))
             .clickable(enabled = !busy) {
                 scope.launch {
                     busy = true
@@ -798,7 +834,7 @@ fun PerfOptButton(engine: Engine, onDone: () -> Unit) {
         }
     }
     report?.let { rp ->
-        AlertDialog(
+        GlassAlert(
             onDismissRequest = { report = null; onDone() },
             confirmButton = { TextButton(onClick = { report = null; onDone() }) { Text("إغلاق") } },
             title = { Text("أوامر لم تعمل على جهازك", fontSize = 15.sp) },
@@ -815,4 +851,58 @@ private fun explain(cmd: String): String {
     val why = r.second.lineSequence().firstOrNull { it.isNotBlank() }?.take(110)
         ?: if (r.first != 0) "رمز الخروج ${r.first}" else "نُفّذ لكن القيمة لم تثبت"
     return "✘ $cmd\n   ← $why" + (if (cur != null) "\n   القيمة الحالية: $cur" else "")
+}
+
+// ───────────── Liquid Glass ─────────────
+val LocalHue = staticCompositionLocalOf<State<Float>> { mutableStateOf(0f) }
+
+/** سطح زجاجي: جسم شفاف متدرج + لمعة علوية + حافة مضيئة. مع hue تتلوّن الحافة بالـ RGB (تُقرأ في مرحلة الرسم فقط) */
+fun Modifier.glass(radius: Dp = 16.dp, hue: State<Float>? = null): Modifier = this.drawBehind {
+    val r = CornerRadius(radius.toPx())
+    drawRoundRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = .20f), Color.White.copy(alpha = .06f), Color.White.copy(alpha = .12f))), cornerRadius = r)
+    drawRoundRect(Brush.verticalGradient(listOf(Color.White.copy(alpha = .26f), Color.Transparent), endY = size.height * .45f), cornerRadius = r)
+    val h = hue?.value
+    val rim = if (h != null) Brush.linearGradient(listOf(hc(h).copy(alpha = .95f), Color.White.copy(alpha = .25f), hc(h, 180f).copy(alpha = .85f)))
+              else Brush.linearGradient(listOf(Color.White.copy(alpha = .65f), Color.White.copy(alpha = .08f), Color.White.copy(alpha = .35f)))
+    val i = .75.dp.toPx()
+    drawRoundRect(rim, topLeft = Offset(i, i), size = Size(size.width - 2 * i, size.height - 2 * i), cornerRadius = r, style = Stroke(1.5.dp.toPx()))
+}
+
+@Composable
+fun GlassButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier.height(44.dp).glass(22.dp, LocalHue.current).clip(RoundedCornerShape(22.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) { Text(text, color = if (enabled) Color.White else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1) }
+}
+
+/** تغبيش ما خلف النافذة (أندرويد 12+). لا يعمل إذا كان disable_window_blurs مفعّلاً */
+@Composable
+fun DialogBlur() {
+    val view = LocalView.current
+    SideEffect {
+        val w = ((view as? DialogWindowProvider) ?: (view.parent as? DialogWindowProvider))?.window
+        if (w != null && Build.VERSION.SDK_INT >= 31) {
+            w.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            w.attributes = w.attributes.also { it.blurBehindRadius = 40 }
+        }
+    }
+}
+
+@Composable
+fun GlassAlert(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null
+) {
+    AlertDialog(
+        onDismissRequest = onDismissRequest, confirmButton = confirmButton, dismissButton = dismissButton, title = title,
+        text = { DialogBlur(); text?.invoke() },
+        shape = RoundedCornerShape(28.dp),
+        containerColor = Color(0xFF1B1738).copy(alpha = 0.74f),
+        titleContentColor = Color.White, textContentColor = Color.White, tonalElevation = 0.dp
+    )
 }
