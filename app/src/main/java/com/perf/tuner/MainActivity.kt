@@ -764,14 +764,65 @@ private val PERF_CMDS = listOf(
     "settings put system touch_jitter_suppression 1",
     "settings put system touch_filter_deadzone_radius 0.1",
     "settings put system touch_area_filtering_enable 1",
-    "settings put global force_gpu_rendering 1"
+    "settings put global force_gpu_rendering 1",
+    "settings put secure game_mode 1",
+    "setprop persist.sys.game.mode 1",
+    "settings put system min_refresh_rate 120.0",
+    "settings put system peak_refresh_rate 120.0",
+    "settings put system user_refresh_rate 120.0",
+    "setprop persist.sys.touch.sampling 1",
+    "setprop debug.touch.sampling 1",
+    "settings put secure speed_mode_enable 1",
+    "settings put system hw3d.force 1",
+    "settings put system hwui.disable_vsync true",
+    "settings put system hwui.render_dirty_regions false",
+    "settings put system persist.sys.composition.type gpu",
+    "settings put system persist.sys.ui.hw 1",
+    "settings put system ro.config.enable.hw_accel true",
+    "settings put system video.accelerate.hw 1",
+    "settings put system game.accelerate.hw 1",
+    "setprop debug.composition.type gpu",
+    "setprop debug.performance.tuning 1",
+    "setprop debug.performance.accoustic.force true",
+    "setprop debug.javafx.animation.fullspeed true",
+    "setprop debug.cpurend.vsync false",
+    "setprop debug.gpurend.vsync false",
+    "setprop debug.rs.max-threads 8",
+    "setprop debug.rs.min-perf_percent 100",
+    "setprop debug.sf.disable_backpressure 1",
+    "setprop debug.sf.latch_unsignaled 1",
+    "setprop debug.sf.enable_hwc_vds 1",
+    "setprop debug.sf.hw 0",
+    "setprop debug.hwui.fps_divisor -1",
+    "setprop debug.systemuicompilerfilter speed",
+    "setprop debug.sf.scroll_boost_refreshrate 1",
+    "settings put global development_settings_enabled 1",
+    "settings put global animator_duration_scale 0.5",
+    "settings put global transition_animation_scale 0.5",
+    "settings put global window_animation_scale 0.5",
+    "settings put system hw3d.force 1",
+    "settings put system hwui.disable_vsync false",
+    "settings put system persist.sys.ui.hw 1",
+    "settings put system video.accelerate.hw 1",
+    "settings put system ro.config.enable.hw_accel true",
+    "setprop debug.composition.type gpu",
+    "setprop debug.performance.tuning 1",
+    "setprop debug.sf.latch_unsignaled 1",
+    "setprop debug.sf.enable_hwc_vds 1",
+    "setprop debug.egl.hw 1",
+    "cmd device_config put activity_manager sf.high_fps_early_phase_offset_ns 0",
+    "cmd device_config put activity_manager sf.high_fps_early_gl_phase_offset_ns 0",
+    "settings put system thermal_limit_refresh_rate 10"
 )
 
 // كل أمر تفعيلة مستقلة: يفشل أحدها (مثل مفاتيح سامسونج) دون أن يوقف الباقي، والأوامر غير settings لها عكس
 private val PERF_OPT = PERF_CMDS.map { c ->
+    val sp = Regex("""setprop (\S+) .*""").find(c)
+    val dc = Regex("""cmd device_config put (\S+) (\S+) .*""").find(c)
     Tweak(c, "", listOf(c), when {
         c.startsWith("cmd power") -> listOf("cmd power set-fixed-performance-mode-enabled false")
-        c.startsWith("setprop") -> listOf("setprop debug.force-opengl 0")
+        sp != null -> listOf("setprop ${sp.groupValues[1]} \"\"")
+        dc != null -> listOf("cmd device_config delete ${dc.groupValues[1]} ${dc.groupValues[2]}")
         else -> emptyList()
     })
 }
