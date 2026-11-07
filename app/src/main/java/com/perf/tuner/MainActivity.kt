@@ -322,6 +322,7 @@ fun Page(page: Int, engine: Engine, onBoost: () -> Unit) {
     val list = TWEAKS[page].orEmpty()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { PerfOptButton(engine, onBoost) }
+        item { ThermalBoostButton(engine, onBoost) }
         item { BoostBar(engine, onBoost) }
         item { Text(CATS[page], color = ACCENT, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
         if (page == 8) item {
@@ -956,4 +957,172 @@ fun GlassAlert(
         containerColor = Color(0xFF1B1738).copy(alpha = 0.74f),
         titleContentColor = Color.White, textContentColor = Color.White, tonalElevation = 0.dp
     )
+}
+
+// ───────────── Thermal Boost ─────────────
+private val THERMAL_SET_TWEAKS = (THERMAL_SETTINGS + THERMAL_DRIVER_CMD).map { Tweak(it, "", listOf(it)) }
+
+/** يراقب حرارة البطارية كل 10 ثوانٍ؛ عند الوصول للحد يلغي التجاوز تلقائياً (يعمل ما دام التطبيق حياً) */
+private object ThermalGuard {
+    @Volatile var running = false
+    private var job: kotlinx.coroutines.Job? = null
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    fun start(ctx: Context, limitC: Float = 44f, onTrip: (Float) -> Unit) {
+        if (running) return
+        running = true
+        job = scope.launch {
+            while (running) {
+                val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val t = (b?.getIntExtra("temperature", 0) ?: 0) / 10f
+                if (t >= limitC) {
+                    Shell.run("cmd thermalservice reset")
+                    Shell.run("cmd power set-fixed-performance-mode-enabled false")
+                    running = false
+                    onTrip(t)
+                    break
+                }
+                delay(10_000)
+            }
+        }
+    }
+
+    fun stop() { running = false; job?.cancel() }
+}
+
+private fun thermalApply(ctx: Context, engine: Engine, progress: (String) -> Unit): String {
+    val sp = ctx.getSharedPreferences("perf", 0)
+    val rep = StringBuilder()
+    val res = Shell.run("wm size | grep -o '[0-9]*x[0-9]*' | head -n1").second.ifBlank { "720x1640" }
+    val props = THERMAL_PROPS.map { it.first to it.second.replace("{RES}", res) }
+
+    progress("حفظ القيم الأصلية…")
+    val snap = Shell.run(props.joinToString("; ") { "echo \"${it.first}=\$(getprop ${it.first})\"" }).second
+    sp.edit().putString("thermal_orig", snap).apply()
+
+    progress("إغلاق التطبيقات الخلفية…")
+    Shell.run("cmd activity kill-all")
+
+    progress("تجاوز Thermal Service…")
+    val thermal = Shell.run("cmd thermalservice override-status 0").first == 0
+    val perf = Shell.run("cmd power set-fixed-performance-mode-enabled true").first == 0
+
+    progress("تطبيق ${props.size} خاصية…")
+    val out = Shell.run(props.joinToString("; ") { "setprop ${it.first} ${it.second} >/dev/null 2>&1 && echo ok || echo \"fail ${it.first}\"" }).second
+    val okProps = out.lines().count { it.trim() == "ok" }
+
+    progress("تطبيق إعدادات النظام…")
+    var okSet = 0
+    THERMAL_SET_TWEAKS.forEachIndexed { i, tw -> if (engine.apply(tw, "thermal-s$i")) okSet++ }
+
+    progress("وضع الأداء للألعاب…")
+    var okModes = 0
+    for (p in THERMAL_MODE_PKGS) if (Shell.run("cmd game mode performance $p").first == 0) okModes++
+
+    var compiled = 0
+    for (p in THERMAL_COMPILE_PKGS) {
+        progress("تجميع $p …")
+        if (Shell.run("cmd package compile -m everything -f $p").second.contains("Success")) compiled++
+    }
+
+    sp.edit().putBoolean("thermal_on", true).apply()
+    rep.append("🌡 تجاوز Thermal Service: ").append(if (thermal) "✔" else "✘ (غير مدعوم)").append('\n')
+    rep.append("⚡ الأداء الثابت: ").append(if (perf) "✔" else "✘ (غير مدعوم)").append('\n')
+    rep.append("🧩 خصائص setprop: $okProps / ${props.size}\n")
+    rep.append("⚙ إعدادات النظام: $okSet / ${THERMAL_SET_TWEAKS.size}\n")
+    rep.append("🎮 Game Mode: $okModes / ${THERMAL_MODE_PKGS.size} (المثبّت فقط)\n")
+    rep.append("🧪 ألعاب جُمّعت: $compiled / ${THERMAL_COMPILE_PKGS.size} (المثبّت فقط)\n\n")
+    rep.append("حارس الحرارة فعّال: يلغي التجاوز تلقائياً عند 44°م.\n")
+    rep.append("ملاحظة: معظم خصائص debug.* لا يقرؤها النظام فلا تغيّر شيئاً. أثر هذا الزر الحقيقي في تجاوز Thermal Service والأداء الثابت وGame Mode والتجميع.")
+    return rep.toString()
+}
+
+private fun thermalRevert(ctx: Context, engine: Engine) {
+    val sp = ctx.getSharedPreferences("perf", 0)
+    ThermalGuard.stop()
+    Shell.run("cmd thermalservice reset")
+    Shell.run("cmd power set-fixed-performance-mode-enabled false")
+    val orig = (sp.getString("thermal_orig", "") ?: "").lines().mapNotNull { l ->
+        val i = l.indexOf('=')
+        if (i > 0) l.substring(0, i) to l.substring(i + 1) else null
+    }
+    if (orig.isNotEmpty()) Shell.run(orig.joinToString("; ") { "setprop ${it.first} \"${it.second}\" >/dev/null 2>&1" })
+    THERMAL_SET_TWEAKS.forEachIndexed { i, tw -> engine.revert(tw, "thermal-s$i") }
+    Shell.run(THERMAL_MODE_PKGS.joinToString("; ") { "cmd game mode standard $it" })
+    sp.edit().putBoolean("thermal_on", false).apply()
+}
+
+@Composable
+fun ThermalBoostButton(engine: Engine, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sp = remember { ctx.getSharedPreferences("perf", 0) }
+    var on by remember { mutableStateOf(sp.getBoolean("thermal_on", false)) }
+    var busy by remember { mutableStateOf(false) }
+    var stage by remember { mutableStateOf("") }
+    var report by remember { mutableStateOf<String?>(null) }
+
+    fun startGuard() = ThermalGuard.start(ctx) { temp ->
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            on = false
+            sp.edit().putBoolean("thermal_on", false).apply()
+            Toast.makeText(ctx, "🛑 حارس الحرارة ألغى Thermal Boost عند ${temp}°م", Toast.LENGTH_LONG).show()
+        }
+    }
+    LaunchedEffect(Unit) { if (on && !ThermalGuard.running) startGuard() }
+
+    val t = rememberInfiniteTransition(label = "fire")
+    val phase = t.animateFloat(0f, 1f, infiniteRepeatable(tween(2200, easing = LinearEasing)), label = "fp")
+    val pulse = t.animateFloat(0.3f, 1f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "fpp")
+    val fire = listOf(Color(0xFFFF1744), Color(0xFFFF9100), Color(0xFFFFEA00))
+
+    Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().height(64.dp)
+                .drawBehind {
+                    val r = CornerRadius(30.dp.toPx())
+                    val brush = Brush.linearGradient(fire, start = Offset(0f, 0f), end = Offset(size.width, size.height))
+                    for (i in 5 downTo 1) drawRoundRect(brush, cornerRadius = r, style = Stroke((i * 5).dp.toPx()), alpha = pulse.value * 0.08f)
+                    drawRoundRect(Brush.verticalGradient(listOf(Color(0xFF3A1208).copy(alpha = .80f), Color(0xFF14102B).copy(alpha = .65f))), cornerRadius = r)
+                    val x = size.width * (phase.value * 1.6f - 0.3f)
+                    drawRoundRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.White.copy(alpha = .22f), Color.Transparent),
+                        startX = x - size.width * .25f, endX = x + size.width * .25f), cornerRadius = r)
+                    drawRoundRect(brush, cornerRadius = r, style = Stroke(2.5.dp.toPx()))
+                }
+                .clip(RoundedCornerShape(30.dp))
+                .clickable(enabled = !busy) {
+                    scope.launch {
+                        busy = true
+                        if (!on) {
+                            val rep = withContext(Dispatchers.IO) { thermalApply(ctx, engine) { s -> stage = s } }
+                            on = true; report = rep
+                            startGuard()
+                        } else {
+                            withContext(Dispatchers.IO) { thermalRevert(ctx, engine) }
+                            on = false
+                            Toast.makeText(ctx, "♻ أُلغي Thermal Boost وعادت الإعدادات", Toast.LENGTH_LONG).show()
+                        }
+                        busy = false
+                        if (report == null) onDone()
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(if (busy) "..." else "🔥 THERMAL BOOST", color = Color.White, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                Text(
+                    if (busy) stage else if (on) "ON ✔  حارس 44°م فعّال — اضغط للإيقاف" else "تجاوز تقييد الحرارة + أداء ثابت + تحسين الألعاب",
+                    color = Color(0xFFFFD6A5), fontSize = 11.sp, maxLines = 1
+                )
+            }
+        }
+    }
+    report?.let { rp ->
+        GlassAlert(
+            onDismissRequest = { report = null; onDone() },
+            confirmButton = { TextButton(onClick = { report = null; onDone() }) { Text("إغلاق") } },
+            title = { Text("نتيجة Thermal Boost", fontSize = 15.sp) },
+            text = { Text(rp, Modifier.verticalScroll(rememberScrollState()), fontSize = 12.sp) }
+        )
+    }
 }
