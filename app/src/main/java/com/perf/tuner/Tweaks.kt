@@ -94,6 +94,11 @@ class Engine(ctx: Context) {
     }
     fun choiceSel(title: String): String = sp.getString("ch_$title", "") ?: ""
     fun setChoiceSel(title: String, label: String) { sp.edit().putString("ch_$title", label).apply() }
+    fun onIds(): List<String> = sp.all.filter { it.key.startsWith("on_") && it.value == true }
+        .map { it.key.removePrefix("on_") }.filter { Regex("""\d+-\d+""").matches(it) }
+    fun choiceMap(): Map<String, String> = sp.all
+        .filter { it.key.startsWith("ch_") && (it.value as? String).orEmpty().isNotEmpty() }
+        .mapKeys { it.key.removePrefix("ch_") }.mapValues { it.value as String }
     fun dpiDeadline(): Long = sp.getLong("dpi_dl", 0L)
     fun setDpiDeadline(v: Long) { sp.edit().putLong("dpi_dl", v).apply() }
 
