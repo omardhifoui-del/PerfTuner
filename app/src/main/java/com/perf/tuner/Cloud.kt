@@ -1,5 +1,6 @@
 package com.perf.tuner
 
+import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -34,7 +35,13 @@ object Cloud {
             "ts" to System.currentTimeMillis()
         )
         doc().set(data)
-            .addOnSuccessListener { done("✔ حُفظت إعداداتك في حسابك (${on.size} تفعيلة)") }
+            .addOnSuccessListener {
+                runCatching {
+                    val sp = FirebaseApp.getInstance().applicationContext.getSharedPreferences("stats", 0)
+                    sp.edit().putLong("last_save", System.currentTimeMillis()).putInt("saves", sp.getInt("saves", 0) + 1).apply()
+                }
+                done("✔ حُفظت إعداداتك في حسابك (${on.size} تفعيلة)")
+            }
             .addOnFailureListener { done("✘ " + errorText(it)) }
     }
 
