@@ -1,5 +1,6 @@
 package com.perf.tuner
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
@@ -17,6 +18,11 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -79,7 +85,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
         setContent {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                MaterialTheme(colorScheme = darkColorScheme()) { App(engine, player) }
+                MaterialTheme(colorScheme = darkColorScheme()) { AuthGate(engine, player) }
             }
         }
     }
@@ -325,6 +331,7 @@ fun Page(page: Int, engine: Engine, onBoost: () -> Unit) {
         item { ThermalBoostButton(engine, onBoost) }
         item { BoostBar(engine, onBoost) }
         item { Text(CATS[page], color = ACCENT, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+        if (page == 9) item { AccountCard(engine, onBoost) }
         if (page == 8) item {
             var v by remember { mutableStateOf(engine.pkgs().joinToString(", ")) }
             OutlinedTextField(
@@ -1123,6 +1130,138 @@ fun ThermalBoostButton(engine: Engine, onDone: () -> Unit) {
             confirmButton = { TextButton(onClick = { report = null; onDone() }) { Text("إغلاق") } },
             title = { Text("نتيجة Thermal Boost", fontSize = 15.sp) },
             text = { Text(rp, Modifier.verticalScroll(rememberScrollState()), fontSize = 12.sp) }
+        )
+    }
+}
+
+// ───────────── الحساب (Firebase) ─────────────
+@Composable
+fun AuthGate(engine: Engine, player: MediaPlayer?) {
+    val ctx = LocalContext.current
+    val sp = remember { ctx.getSharedPreferences("auth", 0) }
+    val firebaseOk = remember { try { FirebaseApp.getApps(ctx).isNotEmpty() } catch (e: Throwable) { false } }
+    var skipped by remember { mutableStateOf(sp.getBoolean("skip", false)) }
+    var user by remember { mutableStateOf(if (firebaseOk) FirebaseAuth.getInstance().currentUser else null) }
+    if (!firebaseOk || user != null || skipped) App(engine, player)
+    else AuthScreen(
+        onUser = { user = FirebaseAuth.getInstance().currentUser },
+        onSkip = { sp.edit().putBoolean("skip", true).apply(); skipped = true }
+    )
+}
+
+@Composable
+fun AuthScreen(onUser: () -> Unit, onSkip: () -> Unit) {
+    var email by remember { mutableStateOf("") }
+    var pass by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val auth = remember { FirebaseAuth.getInstance() }
+    fun check(): Boolean {
+        if (email.isBlank() || pass.isBlank()) { msg = "اكتب البريد وكلمة المرور"; return false }
+        return true
+    }
+    fun login() {
+        if (!check()) return
+        busy = true; msg = null
+        auth.signInWithEmailAndPassword(email.trim(), pass).addOnCompleteListener { t ->
+            busy = false
+            if (t.isSuccessful) onUser() else msg = Cloud.errorText(t.exception)
+        }
+    }
+    fun register() {
+        if (!check()) return
+        busy = true; msg = null
+        auth.createUserWithEmailAndPassword(email.trim(), pass).addOnCompleteListener { t ->
+            busy = false
+            if (t.isSuccessful) onUser() else msg = Cloud.errorText(t.exception)
+        }
+    }
+    fun reset() {
+        if (email.isBlank()) { msg = "اكتب بريدك أولاً ثم اضغط «نسيت كلمة المرور»"; return }
+        auth.sendPasswordResetEmail(email.trim()).addOnCompleteListener { t ->
+            msg = if (t.isSuccessful) "أُرسل رابط استعادة كلمة المرور إلى بريدك" else Cloud.errorText(t.exception)
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        AppBackground()
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("⚡ PERF TUNER", style = TextStyle(brush = Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFB388FF))),
+                fontSize = 30.sp, fontWeight = FontWeight.Black))
+            Spacer(Modifier.height(10.dp))
+            Text("سجّل الدخول لتبقى إعداداتك محفوظة في حسابك", color = Color(0xFFB8B3D9), fontSize = 13.sp)
+            Spacer(Modifier.height(24.dp))
+            Column(Modifier.fillMaxWidth().glass(24.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = email, onValueChange = { email = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("البريد الإلكتروني") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+                OutlinedTextField(
+                    value = pass, onValueChange = { pass = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("كلمة المرور") }, visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                msg?.let { Text(it, color = Color(0xFFFFB4AB), fontSize = 12.sp) }
+                GlassButton(if (busy) "..." else "تسجيل الدخول", Modifier.fillMaxWidth(), !busy) { login() }
+                GlassButton("إنشاء حساب جديد", Modifier.fillMaxWidth(), !busy) { register() }
+                TextButton(onClick = { reset() }) { Text("نسيت كلمة المرور؟") }
+            }
+            TextButton(onClick = onSkip) { Text("المتابعة بدون حساب", color = Color.Gray) }
+        }
+    }
+}
+
+@Composable
+fun AccountCard(engine: Engine, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val user = remember { try { FirebaseAuth.getInstance().currentUser } catch (e: Throwable) { null } }
+    var snap by remember { mutableStateOf<Cloud.Snapshot?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()
+    fun leave() {
+        ctx.getSharedPreferences("auth", 0).edit().putBoolean("skip", false).apply()
+        (ctx as? Activity)?.recreate()
+    }
+    Column(Modifier.fillMaxWidth().glass(16.dp).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("👤 الحساب", color = Color.White, fontWeight = FontWeight.Bold)
+        if (user == null) {
+            Text("تستخدم التطبيق بدون حساب؛ إعداداتك تبقى على هذا الهاتف فقط.", color = Color.Gray, fontSize = 12.sp)
+            GlassButton("تسجيل الدخول / إنشاء حساب", Modifier.fillMaxWidth()) { leave() }
+        } else {
+            Text(user.email ?: "", color = Color(0xFF9FD3FF), fontSize = 13.sp)
+            Text("يُحفظ في حسابك: الألعاب المضافة، والتفعيلات التي شغّلتها، وخياراتك. القيم الأصلية لكل هاتف لا تُرفع.",
+                color = Color.Gray, fontSize = 11.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GlassButton("☁ حفظ", Modifier.weight(1f), !busy) {
+                    busy = true; Cloud.save(engine) { busy = false; toast(it) }
+                }
+                GlassButton("⬇ استرجاع", Modifier.weight(1f), !busy) {
+                    busy = true
+                    Cloud.load { s, m -> busy = false; if (s == null) toast(m) else snap = s }
+                }
+                GlassButton("خروج", Modifier.weight(1f), !busy) { FirebaseAuth.getInstance().signOut(); leave() }
+            }
+        }
+    }
+    snap?.let { s ->
+        GlassAlert(
+            onDismissRequest = { snap = null },
+            confirmButton = {
+                Button(onClick = {
+                    snap = null
+                    scope.launch {
+                        busy = true
+                        val n = withContext(Dispatchers.IO) { Cloud.restore(engine, s) }
+                        busy = false; toast("⬇ طُبّق $n على هذا الهاتف"); onDone()
+                    }
+                }) { Text("تطبيق") }
+            },
+            dismissButton = { TextButton(onClick = { snap = null }) { Text("إلغاء") } },
+            title = { Text("استرجاع الإعدادات", fontSize = 15.sp) },
+            text = { Text("سيطبّق التطبيق ${s.on.size} تفعيلة و${s.choices.size} خيارات و${s.pkgs.split(',').count { it.isNotBlank() }} لعبة على هاتفك الآن.") }
         )
     }
 }
