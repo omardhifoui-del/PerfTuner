@@ -1,6 +1,8 @@
 package com.perf.tuner
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
@@ -17,7 +19,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.unit.TextUnit
+import com.google.firebase.auth.UserProfileChangeRequest
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -73,6 +79,7 @@ class MainActivity : ComponentActivity() {
         val id = resources.getIdentifier("funk", "raw", packageName)
         if (id != 0) player = MediaPlayer.create(this, id)?.apply { isLooping = true; setVolume(.6f, .6f) }
         val engine = Engine(this)
+        getSharedPreferences("stats", 0).let { it.edit().putInt("launches", it.getInt("launches", 0) + 1).apply() }
         try {
             if (rikka.shizuku.Shizuku.pingBinder() &&
                 rikka.shizuku.Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -107,12 +114,14 @@ private val ACCENT = Color(0xFF7C4DFF)
 fun App(engine: Engine, player: MediaPlayer?) {
     var sel by remember { mutableIntStateOf(0) }
     var ver by remember { mutableIntStateOf(0) }
+    var showProfile by remember { mutableStateOf(false) }
+    BackHandler(enabled = showProfile) { showProfile = false }
     val hue = rememberHue()   // لا نقرأ .value هنا حتى لا تُعاد رسم الشاشة كلها
     CompositionLocalProvider(LocalHue provides hue) {
     Box(Modifier.fillMaxSize()) {
     AppBackground()
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
-        Header(hue, player)
+        Header(hue, player) { showProfile = true }
         DeviceCard(hue)
         TopTabs(sel, hue) { sel = it }
         AnimatedContent(
@@ -130,16 +139,22 @@ fun App(engine: Engine, player: MediaPlayer?) {
         ) { page -> key(ver) { Page(page, engine) { ver++ } } }
         BottomNav(sel, hue) { sel = it }
     }
+    AnimatedVisibility(
+        visible = showProfile,
+        enter = slideInVertically(tween(420, easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f))) { it / 2 } + fadeIn(tween(300)),
+        exit = slideOutVertically(tween(300)) { it / 2 } + fadeOut(tween(200))
+    ) { ProfileScreen(engine) { showProfile = false } }
     }
     }
 }
 
 @Composable
-fun Header(hue: State<Float>, player: MediaPlayer?) {
+fun Header(hue: State<Float>, player: MediaPlayer?, onProfile: () -> Unit) {
     var music by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("⚡ PERF TUNER", Modifier.weight(1f),
             style = TextStyle(brush = Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFB388FF))), fontSize = 24.sp, fontWeight = FontWeight.Black))
+        TextButton(onClick = onProfile) { Text("👤", fontSize = 22.sp) }
         if (player != null) TextButton(onClick = {
             music = !music; if (music) player.start() else player.pause()
         }) { Text(if (music) "🔊" else "🔇", fontSize = 22.sp) }
@@ -1263,5 +1278,278 @@ fun AccountCard(engine: Engine, onDone: () -> Unit) {
             title = { Text("استرجاع الإعدادات", fontSize = 15.sp) },
             text = { Text("سيطبّق التطبيق ${s.on.size} تفعيلة و${s.choices.size} خيارات و${s.pkgs.split(',').count { it.isNotBlank() }} لعبة على هاتفك الآن.") }
         )
+    }
+}
+
+// ───────────── الملف الشخصي ─────────────
+private val RANKS = listOf(0 to "🌱 مبتدئ", 100 to "⚡ متقدّم", 250 to "🔥 محترف", 500 to "💎 خبير", 900 to "👑 أسطورة")
+
+private fun fmtTime(ms: Long?): String =
+    if (ms == null || ms <= 0L) "—" else java.text.SimpleDateFormat("yyyy-MM-dd  HH:mm", java.util.Locale.US).format(java.util.Date(ms))
+
+@Composable
+fun RgbText(text: String, hue: State<Float>, size: TextUnit) {
+    val c = remember { derivedStateOf { hc((hue.value / 6f).toInt() * 6f) } }
+    Text(text, color = c.value, fontSize = size, fontWeight = FontWeight.Black, maxLines = 1)
+}
+
+@Composable
+fun Avatar(letter: String, hue: State<Float>) {
+    Box(
+        Modifier.size(124.dp).drawBehind {
+            val h = hue.value
+            val r = size.minDimension / 2
+            for (i in 4 downTo 1) drawCircle(hc(h).copy(alpha = .07f * i), radius = r + (i * 4).dp.toPx())
+            val colors = List(7) { hc(h, it * 60f) }
+            rotate(h) { drawCircle(Brush.sweepGradient(colors + colors.first()), radius = r - 4.dp.toPx(), style = Stroke(6.dp.toPx())) }
+            drawCircle(Color(0xFF14102B), radius = r - 10.dp.toPx())
+        },
+        contentAlignment = Alignment.Center
+    ) { Text(letter, fontSize = 54.sp, fontWeight = FontWeight.Black, color = Color.White) }
+}
+
+@Composable
+fun ProfileBadge(text: String) {
+    Box(Modifier.glass(14.dp).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Text(text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun InfoCard(title: String, rows: List<Pair<String, String>>, hue: State<Float>? = null) {
+    Column(Modifier.fillMaxWidth().glass(20.dp, hue).padding(14.dp)) {
+        Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(Modifier.height(8.dp))
+        rows.forEachIndexed { i, (k, v) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(k, color = Color(0xFFB8B3D9), fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(v, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+            }
+            if (i < rows.lastIndex) Box(Modifier.fillMaxWidth().height(.5.dp).background(Color.White.copy(alpha = .12f)))
+        }
+    }
+}
+
+@Composable
+fun ProfileScreen(engine: Engine, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val hue = LocalHue.current
+    val st = remember { ctx.getSharedPreferences("stats", 0) }
+    val user = remember { try { FirebaseAuth.getInstance().currentUser } catch (e: Throwable) { null } }
+    var name by remember { mutableStateOf(user?.displayName?.takeIf { it.isNotBlank() } ?: user?.email?.substringBefore('@') ?: "ضيف") }
+    var nick by remember { mutableStateOf(user?.displayName ?: "") }
+    var busy by remember { mutableStateOf(false) }
+    fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()
+    fun leave() {
+        ctx.getSharedPreferences("auth", 0).edit().putBoolean("skip", false).apply()
+        (ctx as? Activity)?.recreate()
+    }
+
+    // أرقام الاستخدام والرتبة
+    val total = remember { TWEAKS.values.sumOf { it.size } }
+    val onN = remember { engine.onIds().size }
+    val perfOn = remember { PERF_OPT.indices.any { engine.isOn("perfopt-$it") } }
+    val thermalOn = remember { ctx.getSharedPreferences("perf", 0).getBoolean("thermal_on", false) }
+    val launches = st.getInt("launches", 0)
+    val saves = st.getInt("saves", 0)
+    val xp = onN * 10 + launches * 3 + saves * 25 + (if (perfOn) 40 else 0) + (if (thermalOn) 40 else 0)
+    val rankIdx = RANKS.indexOfLast { xp >= it.first }
+    val nextXp = RANKS.getOrNull(rankIdx + 1)?.first
+    val frac = if (nextXp == null) 1f else (xp - RANKS[rankIdx].first).toFloat() / (nextXp - RANKS[rankIdx].first)
+
+    // معلومات الجهاز
+    val pkgInfo = remember { try { ctx.packageManager.getPackageInfo(ctx.packageName, 0) } catch (e: Throwable) { null } }
+    val days = pkgInfo?.let { ((System.currentTimeMillis() - it.firstInstallTime) / 86_400_000L).toInt() } ?: 0
+    val shz = remember { try { if (rikka.shizuku.Shizuku.pingBinder()) "متصل • v${rikka.shizuku.Shizuku.getVersion()}" else "غير متصل" } catch (e: Throwable) { "غير متاح" } }
+    val mi = remember { ActivityManager.MemoryInfo().also { (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it) } }
+    val sf = remember { StatFs(Environment.getDataDirectory().path) }
+    val bat = remember { ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) }
+    val temp = (bat?.getIntExtra("temperature", 0) ?: 0) / 10f
+    val level = bat?.getIntExtra("level", 0) ?: 0
+    @Suppress("DEPRECATION")
+    val hz = remember { (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.refreshRate }
+    val gb = 1073741824.0
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF0B0B18))) {
+        AppBackground()
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("الملف الشخصي", Modifier.weight(1f), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                GlassButton("✕", Modifier.width(52.dp)) { onClose() }
+            }
+
+            // البطاقة الرئيسية
+            Column(Modifier.fillMaxWidth().glow(28.dp, hue).glass(28.dp, hue).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Avatar((name.firstOrNull() ?: '?').uppercaseChar().toString(), hue)
+                Spacer(Modifier.height(14.dp))
+                RgbText(name, hue, 26.sp)
+                Text(user?.email ?: "حساب ضيف — إعداداتك على هذا الهاتف فقط", color = Color(0xFF9FD3FF), fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProfileBadge(RANKS[rankIdx].second)
+                    ProfileBadge(if (user == null) "👤 ضيف" else if (user.isEmailVerified) "✔ بريد موثّق" else "✉ بريد غير موثّق")
+                }
+                Spacer(Modifier.height(14.dp))
+                Text("XP $xp" + (nextXp?.let { "  /  $it" } ?: "  •  أعلى رتبة"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = .15f))) {
+                    Box(Modifier.fillMaxWidth(frac.coerceIn(0.03f, 1f)).fillMaxHeight().drawBehind {
+                        drawRect(Brush.horizontalGradient(List(5) { hc(hue.value, it * 70f) }))
+                    })
+                }
+                Text("الرتبة تعتمد على استخدامك للتطبيق (تفعيلات وحفظ سحابي)، وليست مقياساً لأداء الهاتف.", color = Color.Gray, fontSize = 10.sp)
+            }
+
+            // أرقام
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Tile("ACTIVE", "$onN/$total", onN.toFloat() / total, hc(hue.value))
+                Tile("GAMES", "${engine.pkgs().size}", null, ACCENT)
+                Tile("LAUNCHES", "$launches", null, ACCENT)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Tile("DAYS", "$days", null, ACCENT)
+                Tile("CLOUD SAVES", "$saves", null, ACCENT)
+                Tile("RANK", "${rankIdx + 1}/${RANKS.size}", (rankIdx + 1f) / RANKS.size, hc(hue.value, 120f))
+            }
+
+            // الإنجازات
+            AchievementsCard(
+                listOf(
+                    Triple("🔗", "Shizuku متصل", shz.startsWith("متصل")),
+                    Triple("🚀", "أول تفعيل", onN >= 1),
+                    Triple("🎛", "10 تفعيلات", onN >= 10),
+                    Triple("🧙", "30 تفعيلة", onN >= 30),
+                    Triple("⚡", "Performance ON", perfOn),
+                    Triple("🔥", "Thermal ON", thermalOn),
+                    Triple("🎮", "صائد الألعاب", engine.pkgs().isNotEmpty()),
+                    Triple("☁", "أول حفظ سحابي", saves >= 1),
+                    Triple("✔", "بريد موثّق", user?.isEmailVerified == true),
+                    Triple("📅", "أسبوع معنا", days >= 7),
+                    Triple("🔁", "20 فتحة", launches >= 20),
+                    Triple("👑", "رتبة أسطورة", rankIdx == RANKS.lastIndex)
+                ),
+                hue
+            )
+
+            // الحساب
+            InfoCard(
+                "🔐 معلومات الحساب",
+                listOf(
+                    "الاسم" to name,
+                    "البريد" to (user?.email ?: "—"),
+                    "المعرّف (UID)" to (user?.uid?.let { it.take(8) + "…" } ?: "—"),
+                    "إنشاء الحساب" to fmtTime(user?.metadata?.creationTimestamp),
+                    "آخر دخول" to fmtTime(user?.metadata?.lastSignInTimestamp),
+                    "طريقة الدخول" to (user?.providerData?.lastOrNull()?.providerId?.let { if (it == "password") "بريد وكلمة مرور" else it } ?: "—"),
+                    "توثيق البريد" to (if (user == null) "—" else if (user.isEmailVerified) "موثّق ✔" else "غير موثّق"),
+                    "آخر حفظ سحابي" to fmtTime(st.getLong("last_save", 0L))
+                ),
+                hue
+            )
+
+            if (user != null) {
+                Column(Modifier.fillMaxWidth().glass(20.dp).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("✏ إدارة الحساب", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    OutlinedTextField(
+                        value = nick, onValueChange = { nick = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        label = { Text("اسم العرض") }
+                    )
+                    GlassButton("حفظ الاسم", Modifier.fillMaxWidth(), !busy && nick.isNotBlank()) {
+                        busy = true
+                        user.updateProfile(UserProfileChangeRequest.Builder().setDisplayName(nick.trim()).build()).addOnCompleteListener { t ->
+                            busy = false
+                            if (t.isSuccessful) { name = nick.trim(); toast("✔ حُفظ الاسم") } else toast("✘ " + Cloud.errorText(t.exception))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        GlassButton("📋 نسخ المعرّف", Modifier.weight(1f)) {
+                            (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("uid", user.uid))
+                            toast("نُسخ المعرّف")
+                        }
+                        GlassButton("☁ حفظ", Modifier.weight(1f), !busy) {
+                            busy = true; Cloud.save(engine) { busy = false; toast(it) }
+                        }
+                    }
+                    if (!user.isEmailVerified) GlassButton("✉ إرسال رابط توثيق البريد", Modifier.fillMaxWidth(), !busy) {
+                        busy = true
+                        user.sendEmailVerification().addOnCompleteListener { t ->
+                            busy = false
+                            toast(if (t.isSuccessful) "أُرسل الرابط إلى بريدك" else "✘ " + Cloud.errorText(t.exception))
+                        }
+                    }
+                    GlassButton("تسجيل الخروج", Modifier.fillMaxWidth(), !busy) { FirebaseAuth.getInstance().signOut(); leave() }
+                }
+            } else {
+                GlassButton("تسجيل الدخول / إنشاء حساب", Modifier.fillMaxWidth()) { leave() }
+            }
+
+            // الجهاز والتطبيق
+            InfoCard(
+                "📱 الجهاز والنظام",
+                listOf(
+                    "الجهاز" to "${Build.MANUFACTURER} ${Build.MODEL}".uppercase(),
+                    "أندرويد" to "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+                    "المعالج" to "${Build.HARDWARE} • ${Runtime.getRuntime().availableProcessors()} أنوية",
+                    "الذاكرة" to "${f1(mi.totalMem / gb)} GB (متاح ${f1(mi.availMem / gb)})",
+                    "التخزين" to "${f1(sf.totalBytes / gb)} GB (حر ${f1(sf.availableBytes / gb)})",
+                    "معدل التحديث الحالي" to "${f1(hz.toDouble())} Hz",
+                    "البطارية" to "$level% • ${temp}°C",
+                    "الدقة" to ctx.resources.displayMetrics.let { "${it.widthPixels}x${it.heightPixels}" },
+                    "تحديث الأمان" to (Build.VERSION.SECURITY_PATCH ?: "—"),
+                    "النواة" to (System.getProperty("os.version") ?: "—"),
+                    "مدة تشغيل الهاتف" to "${android.os.SystemClock.elapsedRealtime() / 3_600_000} ساعة",
+                    "اللغة" to java.util.Locale.getDefault().displayLanguage,
+                    "Shizuku" to shz
+                ),
+                hue
+            )
+            InfoCard(
+                "⚙ التطبيق",
+                listOf(
+                    "الإصدار" to (pkgInfo?.versionName ?: "—"),
+                    "الأيام منذ التثبيت" to "$days",
+                    "عدد مرات الفتح" to "$launches",
+                    "عدد التفعيلات الكلي" to "$total",
+                    "التفعيلات النشطة" to "$onN",
+                    "Performance Optimization" to (if (perfOn) "ON ✔" else "OFF"),
+                    "Thermal Boost" to (if (thermalOn) "ON ✔" else "OFF")
+                )
+            )
+            Signature()
+        }
+    }
+}
+
+/** توهج RGB نابض حول البطاقة (يُقرأ hue في مرحلة الرسم فقط) */
+fun Modifier.glow(radius: Dp, hue: State<Float>): Modifier = this.drawBehind {
+    val r = CornerRadius(radius.toPx())
+    val h = hue.value
+    val brush = Brush.linearGradient(listOf(hc(h), hc(h, 120f), hc(h, 240f)))
+    for (i in 6 downTo 1) drawRoundRect(brush, cornerRadius = r, style = Stroke((i * 5).dp.toPx()), alpha = 0.05f)
+}
+
+@Composable
+fun AchievementsCard(items: List<Triple<String, String, Boolean>>, hue: State<Float>) {
+    val got = items.count { it.third }
+    Column(Modifier.fillMaxWidth().glass(20.dp, hue).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("🏆 الإنجازات  $got/${items.size}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        items.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (icon, title, on) ->
+                    Column(
+                        Modifier.weight(1f).then(if (on) Modifier.glass(14.dp, hue) else Modifier.glass(14.dp)).padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(if (on) icon else "🔒", fontSize = 24.sp, modifier = Modifier.graphicsLayer { alpha = if (on) 1f else .45f })
+                        Text(title, color = if (on) Color.White else Color(0xFF8E89B0), fontSize = 10.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, maxLines = 2)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
