@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "870523946725",
+    "project_id": "perftuner-146ae",
+    "storage_bucket": "perftuner-146ae.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:870523946725:android:227567c4d2e2192d7d360c",
+        "android_client_info": {
+          "package_name": "com.perf.tuner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAutSezoHgIUxjNWlHl1S72FKpHVdM0rVw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
