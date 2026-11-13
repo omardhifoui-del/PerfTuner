@@ -94,6 +94,79 @@ class Engine(ctx: Context) {
     }
     fun choiceSel(title: String): String = sp.getString("ch_$title", "") ?: ""
     fun setChoiceSel(title: String, label: String) { sp.edit().putString("ch_$title", label).apply() }
+    private fun shq(s: String) = "'" + s.replace("'", "'\\''") + "'"
+
+    /** تنفيذ سريع: مئات الأوامر في عملية shell واحدة مع حفظ القيم الأصلية وتسجيل سبب كل فشل */
+    fun applyBatch(items: List<Pair<Tweak, String>>): BatchResult {
+        // 1) نسخ احتياطي لكل مفتاح settings لا نسخة له
+        val need = LinkedHashMap<String, Pair<String, String>>()
+        for ((tw, _) in items) for (c0 in tw.on) for (c in expand(c0)) rx.find(c)?.let {
+            val (ns, k, _) = it.destructured
+            val bk = "b_${ns}_$k"
+            if (!sp.contains(bk)) need[bk] = ns to k
+        }
+        if (need.isNotEmpty()) {
+            val maps = HashMap<String, Map<String, String>>()
+            for (ns in need.values.map { it.first }.distinct()) {
+                maps[ns] = Shell.run("settings list $ns").second.lines().mapNotNull { l ->
+                    val i = l.indexOf('='); if (i > 0) l.substring(0, i) to l.substring(i + 1) else null
+                }.toMap()
+            }
+            val ed = sp.edit()
+            need.forEach { (bk, p) -> ed.putString(bk, maps[p.first]?.get(p.second) ?: "null") }
+            ed.apply()
+        }
+        // 2) كل الأوامر في عملية واحدة
+        val flat = ArrayList<Pair<Int, String>>()
+        items.forEachIndexed { i, (tw, _) -> for (c0 in tw.on) for (c in expand(c0)) flat.add(i to c) }
+        val sb2 = StringBuilder()
+        flat.forEachIndexed { j, (_, c) ->
+            sb2.append("o=\$($c 2>&1); if [ \$? -eq 0 ]; then echo T$j; else echo \"F$j|\$o\"; fi\n")
+        }
+        val res = Shell.run(sb2.toString()).second.lines()
+        val failMsg = HashMap<Int, String>()
+        val okSeen = HashSet<Int>()
+        for (line in res) {
+            val m = Regex("""^([TF])(\d+)(?:\|(.*))?$""").find(line.trim()) ?: continue
+            val j = m.groupValues[2].toInt()
+            if (m.groupValues[1] == "T") okSeen.add(j) else failMsg[j] = m.groupValues[3]
+        }
+        val ok = BooleanArray(items.size) { true }
+        val failures = ArrayList<String>()
+        flat.forEachIndexed { j, (i, c) ->
+            if (j !in okSeen) {
+                ok[i] = false
+                failures.add("✘ $c" + (failMsg[j]?.takeIf { it.isNotBlank() }?.let { "\n   ← " + it.take(110) } ?: ""))
+            }
+        }
+        val ed = sp.edit()
+        items.forEachIndexed { i, (tw, id) -> if (ok[i] && !tw.oneShot) ed.putBoolean("on_$id", true) }
+        ed.apply()
+        return BatchResult(ok.toList(), failures)
+    }
+
+    fun revertBatch(items: List<Pair<Tweak, String>>): BatchResult {
+        val sb = StringBuilder()
+        val keys = ArrayList<String>()
+        for ((tw, _) in items) {
+            for (c in tw.on) rx.find(c)?.let {
+                val (ns, k, _) = it.destructured
+                val bk = "b_${ns}_$k"
+                val orig = sp.getString(bk, null) ?: return@let
+                if (orig == "null" || orig.isEmpty()) sb.append("settings delete $ns $k\n")
+                else sb.append("settings put $ns $k ${shq(orig)}\n")
+                keys.add(bk)
+            }
+            for (c0 in tw.off) for (c in expand(c0)) sb.append("$c\n")
+        }
+        if (sb.isNotEmpty()) Shell.run(sb.toString())
+        val ed = sp.edit()
+        keys.forEach { ed.remove(it) }
+        items.forEach { (_, id) -> ed.putBoolean("on_$id", false) }
+        ed.apply()
+        return BatchResult(items.map { true }, emptyList())
+    }
+
     fun onIds(): List<String> = sp.all.filter { it.key.startsWith("on_") && it.value == true }
         .map { it.key.removePrefix("on_") }.filter { Regex("""\d+-\d+""").matches(it) }
     fun choiceMap(): Map<String, String> = sp.all
@@ -190,3 +263,5 @@ object GameWatcher {
         scope.launch { leave(e) }
     }
 }
+
+class BatchResult(val ok: List<Boolean>, val failures: List<String>)
